@@ -133,11 +133,24 @@ class Agent:
             return {"error": "refused: destructive command blocked"}
         return {"output": self.channel.run(command)[:3000]}
 
+    def privesc_scan(self) -> dict:
+        """Enumerate the host and return GTFOBins-matched privilege-escalation candidates."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from .privesc import candidates, enumerate_host
+        profile = enumerate_host(self.channel.run)
+        return {"id": profile.get("id", "")[:200], "uname": profile.get("uname", "")[:150],
+                "sudo": profile.get("sudo", "")[:500],
+                "suid_sample": "\n".join(profile.get("suid", "").splitlines()[:15]),
+                "privesc_candidates": candidates(profile)[:12]}
+
     def dispatch(self, name: str, args: dict) -> dict:
         fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
               "record_finding": self.record_finding,
               "establish_foothold": self.establish_foothold,
-              "run_command": self.run_command}.get(name)
+              "run_command": self.run_command, "privesc_scan": self.privesc_scan}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -195,6 +208,12 @@ TOOLS = [
                        "refused.",
         "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
                        "required": ["command"]}}},
+    {"type": "function", "function": {
+        "name": "privesc_scan",
+        "description": "Enumerate the compromised host (sudo rights, SUID, capabilities, cron, "
+                       "secrets) and return GTFOBins-matched privilege-escalation candidates. "
+                       "Then confirm a candidate with run_command and check for uid=0.",
+        "parameters": {"type": "object", "properties": {}}}},
 ]
 
 SYSTEM = (
@@ -215,9 +234,10 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "confirmed; DROP anything you could not confirm rather than reporting it as "
                 "potential — do not pad the report with speculation. When you confirm a remote "
                 "code execution vuln, call establish_foothold to get command execution, then "
-                "run_command to enumerate the host (id, uname -a, sudo -l, SUID binaries, cron, "
-                "readable secrets) and escalate privileges — use search_vulns for GTFOBins "
-                "privilege-escalation techniques on binaries you find, and reason beyond them.")
+                "run_command to enumerate the host. Then call privesc_scan to get GTFOBins-"
+                "matched escalation candidates, pick one, run it with run_command, and confirm "
+                "root with `id` (uid=0). Reason beyond the candidates — kernel/cron/writable-path "
+                "escalation won't always be listed. Keep going until you are root or out of leads.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -340,6 +360,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     # foothold tools: gated by exploit, need a channel, destructive commands refused
     assert "requires exploitation" in dev.run_command("id")["error"]
     assert "no foothold" in exp.run_command("id")["error"]
+    assert "requires exploitation" in dev.privesc_scan()["error"]
+    assert "no foothold" in exp.privesc_scan()["error"]
 
     class _Dummy:
         kind = "test"
