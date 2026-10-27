@@ -11,7 +11,7 @@ Reasoning runs on Meta Muse models; a CVE RAG gives the agent current security k
 
 - [x] **Phase 0** — API client + scope guard + smoke test
 - [x] **Phase 1** — CVE RAG (CISA KEV + NVD-by-keyword → local embeddings → LanceDB)
-- [ ] **Phase 2** — recon & fingerprinting
+- [x] **Phase 2** — recon & fingerprinting (passive; feeds research)
 - [ ] **Phase 3** — agent loop (plan → act → verify)
 - [ ] **Phase 4** — reporting
 - [ ] **Phase 5** — hardening & CLI UX
@@ -34,6 +34,7 @@ metsec rag build --nvd-keyword log4j   # + enrich with NVD hits for a product
 metsec rag search "apache log4j rce" -k 3   # query the index (--kev, --min-cvss X)
 metsec research lodash 4.17.4 --ecosystem npm   # live vuln research for a tech+version
 metsec research node 18.12.0 --save             # web-researched vulns, learned into the index
+metsec recon http://localhost:3000 --scope scope.yaml --research   # fingerprint + find vulns
 ```
 
 ## How it finds vulnerabilities
