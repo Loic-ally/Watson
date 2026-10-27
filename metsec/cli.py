@@ -170,13 +170,16 @@ def assess_cmd(args: list[str]) -> int:
     """Full assessment: recon + agent loop → prioritized findings."""
     from .agent import assess
 
-    if not args or "--scope" not in args:
-        print("usage: metsec assess <url> --scope <file> [--active] [--budget N]")
+    if "--scope" not in args:
+        print("usage: metsec assess [<url>] --scope <file> [--active] [--budget N]")
         return 2
-    target = args[0]
     budget = int(args[args.index("--budget") + 1]) if "--budget" in args else 16
+    target = args[0] if args and not args[0].startswith("--") else None
     try:
         s = Scope.load(args[args.index("--scope") + 1])
+        if s.mode != "static" and not target:
+            print("non-static mode needs a target url")
+            return 2
         findings = assess(target, s, active="--active" in args, budget=budget)
     except (OutOfScope, FileNotFoundError) as e:
         print(f"refused: {e}")

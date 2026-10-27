@@ -189,15 +189,19 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     return agent.findings
 
 
-def assess(target: str, scope, active: bool = False, budget: int = 16) -> list[Finding]:
-    """Full assessment: recon → agent loop over the evidence → findings."""
-    from .recon import recon
-
-    inv = recon(target, scope)
-    if active and scope.mode != "static":
-        from .active import active_recon
-        inv.update(active_recon(target, scope))
-    agent = Agent(scope, target, budget)
+def assess(target: str | None, scope, active: bool = False, budget: int = 16) -> list[Finding]:
+    """Full assessment: gather evidence (mode-appropriate) → agent loop → findings."""
+    if scope.mode == "static":
+        from .static import analyze
+        inv = analyze(scope.code_path)
+        target = scope.code_path
+    else:
+        from .recon import recon
+        inv = recon(target, scope)
+        if active:
+            from .active import active_recon
+            inv.update(active_recon(target, scope))
+    agent = Agent(scope, target or scope.code_path, budget)
     run_agent(agent, _inventory_json(inv))
     return agent.findings
 
