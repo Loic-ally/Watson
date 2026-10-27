@@ -209,7 +209,7 @@ TOOLS = [
                        "returns the foothold type and id/whoami. Requires exploitation enabled.",
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string"}, "param": {"type": "string"},
-            "kind": {"type": "string", "enum": ["auto", "cmd-injection", "ssti"]},
+            "kind": {"type": "string", "enum": ["auto", "cmd-injection", "ssti", "webshell"]},
             "base": {"type": "string", "description": "benign base value, e.g. 127.0.0.1"}},
             "required": ["url", "param"]}}},
     {"type": "function", "function": {

