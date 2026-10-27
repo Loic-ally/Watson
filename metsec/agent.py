@@ -152,7 +152,8 @@ SYSTEM = (
     "the tools: look up vulnerabilities for detected tech+versions, and probe in-scope URLs "
     "to confirm conditions. Record a finding ONLY when backed by concrete evidence — a "
     "version match, a tool result, an exposed path, a reflected payload, or a missing "
-    "security header. Never invent vulnerabilities. Stop calling tools when done."
+    "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
+    "not batch recording for the end. Never invent vulnerabilities. Stop when done."
 )
 DETECTION_NOTE = (" Prefer detection over exploitation. Mark a finding 'verified' only when a "
                   "probe confirmed it, otherwise 'potential'.")
@@ -182,13 +183,8 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 
     from . import config
 
-    msgs = [
-        {"role": "system", "content": SYSTEM + (EXPLOIT_NOTE if agent.exploit else DETECTION_NOTE)},
-        {"role": "user", "content": f"Recon inventory for {agent.target}:\n"
-         + json.dumps(inventory, default=str)[:7000]
-         + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
-    ]
-    for _ in range(agent.budget):
+    def turn(msgs: list) -> bool:
+        """One model turn. Returns True if it called tools (should continue)."""
         m = config.client().chat.completions.create(
             model=config.BRAIN, messages=msgs, tools=TOOLS, tool_choice="auto"
         ).choices[0].message
@@ -200,15 +196,31 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
                 for tc in m.tool_calls]
         msgs.append(assistant)
         if not m.tool_calls:
-            break
+            return False
         for tc in m.tool_calls:
             try:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            result = agent.dispatch(tc.function.name, args)
             msgs.append({"role": "tool", "tool_call_id": tc.id,
-                         "content": json.dumps(result, default=str)[:2000]})
+                         "content": json.dumps(agent.dispatch(tc.function.name, args),
+                                               default=str)[:2000]})
+        return True
+
+    msgs = [
+        {"role": "system", "content": SYSTEM + (EXPLOIT_NOTE if agent.exploit else DETECTION_NOTE)},
+        {"role": "user", "content": f"Recon inventory for {agent.target}:\n"
+         + json.dumps(inventory, default=str)[:7000]
+         + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
+    ]
+    exhausted = all(turn(msgs) for _ in range(agent.budget))
+    if exhausted:  # hit budget mid-investigation — force a wrap-up so findings aren't lost
+        msgs.append({"role": "user", "content": "Probing budget reached. Call record_finding "
+                     "now for every vulnerability you confirmed or have concrete evidence for, "
+                     "then stop."})
+        for _ in range(3):
+            if not turn(msgs):
+                break
     return agent.findings
 
 
