@@ -146,11 +146,21 @@ class Agent:
                 "suid_sample": "\n".join(profile.get("suid", "").splitlines()[:15]),
                 "privesc_candidates": candidates(profile)[:12]}
 
+    def loot(self) -> dict:
+        """Capture credentials, keys, and proof files through the foothold."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from .privesc import loot as _loot
+        return _loot(self.channel.run) or {"info": "no readable secrets as current user"}
+
     def dispatch(self, name: str, args: dict) -> dict:
         fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
               "record_finding": self.record_finding,
               "establish_foothold": self.establish_foothold,
-              "run_command": self.run_command, "privesc_scan": self.privesc_scan}.get(name)
+              "run_command": self.run_command, "privesc_scan": self.privesc_scan,
+              "loot": self.loot}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -214,6 +224,12 @@ TOOLS = [
                        "secrets) and return GTFOBins-matched privilege-escalation candidates. "
                        "Then confirm a candidate with run_command and check for uid=0.",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "loot",
+        "description": "Capture readable credentials, SSH keys, .env secrets, and proof files "
+                       "(root.txt/user.txt) through the foothold. Call after foothold and again "
+                       "after escalating to root. Record notable captures as findings.",
+        "parameters": {"type": "object", "properties": {}}}},
 ]
 
 SYSTEM = (
@@ -237,7 +253,9 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "run_command to enumerate the host. Then call privesc_scan to get GTFOBins-"
                 "matched escalation candidates, pick one, run it with run_command, and confirm "
                 "root with `id` (uid=0). Reason beyond the candidates — kernel/cron/writable-path "
-                "escalation won't always be listed. Keep going until you are root or out of leads.")
+                "escalation won't always be listed. Keep going until you are root or out of leads. "
+                "After the foothold, and again once root, call loot to capture credentials, keys, "
+                "and proof files (root.txt/user.txt) and record notable captures as findings.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -362,6 +380,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert "no foothold" in exp.run_command("id")["error"]
     assert "requires exploitation" in dev.privesc_scan()["error"]
     assert "no foothold" in exp.privesc_scan()["error"]
+    assert "requires exploitation" in dev.loot()["error"]
+    assert "no foothold" in exp.loot()["error"]
 
     class _Dummy:
         kind = "test"

