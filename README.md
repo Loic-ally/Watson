@@ -7,6 +7,19 @@ Reasoning runs on Meta Muse models; a CVE RAG gives the agent current security k
 > ⚠️ MetSec only runs against targets you own or are authorized to test. Every run
 > starts from a `scope.yaml` naming who authorized it — no scope, no scan.
 
+## Disclaimer
+
+MetSec is provided **as is**, for authorized security testing and educational use only.
+You are solely responsible for how you use it. By using this tool you confirm you have
+explicit permission to test every target you point it at, and you accept full
+responsibility for complying with all applicable laws and the terms of any service,
+model, or API it relies on.
+
+Running it against systems you do not own or are not authorized to test may be illegal.
+**The author accepts no liability for any misuse, damage, or legal consequence arising
+from use of this tool** — the responsibility is entirely the user's. No warranty of any
+kind is given. If you do not agree, do not use MetSec.
+
 ## Status
 
 - [x] **Phase 0** — API client + scope guard + smoke test
