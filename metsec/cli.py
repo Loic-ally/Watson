@@ -62,6 +62,11 @@ def rag_build(args: list[str]) -> int:
             print(f"indexed {edb_update()} CVEs with public exploits (ExploitDB)")
         except Exception as e:  # noqa: BLE001 — enrichment is best-effort
             print(f"exploitdb update skipped: {e}")
+    if "--attack" in args:
+        from .techniques import fetch_attack
+        att = list(fetch_attack())
+        print(f"fetched {len(att)} MITRE ATT&CK techniques")
+        records += att
     n = CveIndex().build(records)
     print(f"indexed {n} CVEs → .metsec_cache/lancedb")
     return 0

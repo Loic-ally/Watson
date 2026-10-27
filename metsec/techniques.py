@@ -19,6 +19,7 @@ from .rag import _record
 
 GTFOBINS_API = "https://gtfobins.github.io/api.json"
 LOLBAS_API = "https://lolbas-project.github.io/api/lolbas.json"
+ATTACK_JSON = "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 
 
 def _gtfobins_records(data: dict) -> Iterator[dict]:
@@ -69,6 +70,29 @@ def fetch_lolbas() -> Iterator[dict]:
     yield from _lolbas_records(requests.get(LOLBAS_API, timeout=60).json())
 
 
+def _attack_records(stix: dict) -> Iterator[dict]:
+    for o in stix.get("objects", []):
+        if o.get("type") != "attack-pattern" or o.get("revoked") or o.get("x_mitre_deprecated"):
+            continue
+        ext = next((r for r in o.get("external_references", [])
+                    if r.get("source_name") == "mitre-attack"), None)
+        if not ext or not ext.get("external_id"):
+            continue
+        tid = ext["external_id"]
+        tactics = ",".join(p["phase_name"] for p in o.get("kill_chain_phases", [])
+                           if p.get("phase_name"))
+        desc = (o.get("description", "") or "").replace("\n", " ")
+        rec = _record(id=f"attack:{tid}", source="attack",
+                      summary=f"{tid} {o.get('name', '')} — {desc[:160]}",
+                      products=tactics, references=[ext.get("url", "")])
+        rec["text"] = f"mitre attack {tid} {o.get('name', '')} {tactics} {desc[:400]}"
+        yield rec
+
+
+def fetch_attack() -> Iterator[dict]:
+    yield from _attack_records(requests.get(ATTACK_JSON, timeout=180).json())
+
+
 if __name__ == "__main__":  # offline self-check: python -m metsec.techniques
     sample = {
         "functions": {"shell": {"mitre": ["T1059"]},
@@ -95,4 +119,18 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.techniques
     assert len(lol) == 1 and lol[0]["id"] == "lolbas:Certutil.exe"
     assert lol[0]["source"] == "lolbas" and "T1105" in lol[0]["cwe"]
     assert "certutil" in lol[0]["text"].lower()
+
+    stix = {"objects": [
+        {"type": "attack-pattern", "name": "Command and Scripting Interpreter",
+         "description": "Adversaries may abuse command interpreters.",
+         "external_references": [{"source_name": "mitre-attack", "external_id": "T1059",
+                                  "url": "https://attack.mitre.org/techniques/T1059"}],
+         "kill_chain_phases": [{"phase_name": "execution"}]},
+        {"type": "attack-pattern", "revoked": True, "name": "old",
+         "external_references": [{"source_name": "mitre-attack", "external_id": "T0001"}]},
+        {"type": "identity", "name": "not a technique"},
+    ]}
+    att = list(_attack_records(stix))
+    assert len(att) == 1 and att[0]["id"] == "attack:T1059", att
+    assert att[0]["products"] == "execution" and "interpreter" in att[0]["text"].lower()
     print("techniques self-check ok")
