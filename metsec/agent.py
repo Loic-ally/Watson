@@ -8,6 +8,7 @@ prod is detection-first (safe GET only), dev may send payloads.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from urllib.parse import unquote
 
@@ -295,6 +296,9 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
+            hint = (args.get("title") or args.get("command") or args.get("url")
+                    or args.get("tech") or "")
+            print(f"  → {tc.function.name} {str(hint)[:72]}", file=sys.stderr, flush=True)
             msgs.append({"role": "tool", "tool_call_id": tc.id,
                          "content": json.dumps(agent.dispatch(tc.function.name, args),
                                                default=str)[:2000]})
