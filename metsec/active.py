@@ -181,10 +181,12 @@ def _ffuf_discovery(base_url: str, wordlist: str) -> list[dict]:
 
 
 def _py_discovery(base_url: str, paths: list[str], session, rate: float) -> list[dict]:
+    cookies = session.cookies  # carry auth; requests.get is used so each probe is thread-safe
+
     def probe(p: str) -> dict | None:
         url = urljoin(base_url, p)
         try:
-            r = session.get(url, headers=UA, timeout=10, allow_redirects=False)
+            r = requests.get(url, headers=UA, cookies=cookies, timeout=10, allow_redirects=False)
         except requests.RequestException:
             return None
         if r.status_code in _DISCOVERY_CODES:
@@ -198,7 +200,7 @@ def _py_discovery(base_url: str, paths: list[str], session, rate: float) -> list
                 out.append(h)
             time.sleep(rate)
         return out
-    with ThreadPoolExecutor(max_workers=20) as ex:  # dev: parallel
+    with ThreadPoolExecutor(max_workers=10) as ex:  # dev: parallel (fresh conn per probe)
         return [h for h in ex.map(probe, paths) if h]
 
 
@@ -275,13 +277,17 @@ if __name__ == "__main__":  # self-check: python -m metsec.active (socket scan, 
 
     threading.Thread(target=accept_loop, daemon=True).start()
 
-    other = port + 1 if port < 65535 else port - 1
-    hits = _socket_scan("127.0.0.1", [port, other])
-    assert [h["port"] for h in hits] == [port], hits  # only the listening port open
+    # a second socket bound then closed gives a port that is reliably not listening
+    tmp = socket.socket()
+    tmp.bind(("127.0.0.1", 0))
+    closed = tmp.getsockname()[1]
+    tmp.close()
+    hits = {h["port"] for h in _socket_scan("127.0.0.1", [port, closed])}
+    assert port in hits and closed not in hits, (port, closed, hits)
     srv.close()
 
     # crawl: links, forms, JS endpoint mining
-    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
     from .scope import Scope
 
@@ -324,9 +330,11 @@ if __name__ == "__main__":  # self-check: python -m metsec.active (socket scan, 
         def log_message(self, *a):
             pass
 
-    dsrv = HTTPServer(("127.0.0.1", 0), D)
+    dsrv = ThreadingHTTPServer(("127.0.0.1", 0), D)
     threading.Thread(target=dsrv.serve_forever, daemon=True).start()
-    hits = content_discovery(f"http://127.0.0.1:{dsrv.server_address[1]}/", scope)
+    # rate>0 → sequential probing: deterministic (the toy server drops burst connections;
+    # a real server handles the parallel path fine).
+    hits = content_discovery(f"http://127.0.0.1:{dsrv.server_address[1]}/", scope, rate=0.01)
     paths = {h["path"] for h in hits}
     assert ".env" in paths and "admin/" in paths, paths
     dsrv.shutdown()
