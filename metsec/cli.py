@@ -52,10 +52,11 @@ def rag_build(args: list[str]) -> int:
         print(f"fetched {len(nvd)} NVD records for {kw!r}")
         records += nvd
     if "--techniques" in args:
-        from .techniques import fetch_gtfobins
+        from .techniques import fetch_gtfobins, fetch_lolbas
         tech = list(fetch_gtfobins())
-        print(f"fetched {len(tech)} GTFOBins technique records")
-        records += tech
+        lol = list(fetch_lolbas())
+        print(f"fetched {len(tech)} GTFOBins + {len(lol)} LOLBAS technique records")
+        records += tech + lol
     n = CveIndex().build(records)
     print(f"indexed {n} CVEs → .metsec_cache/lancedb")
     return 0
