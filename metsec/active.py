@@ -148,6 +148,71 @@ def crawl(base_url: str, scope, max_pages: int = 50, rate: float = 0.0,
     return {"pages": pages, "endpoints": sorted(endpoints), "forms": forms}
 
 
+# High-signal paths probed when no wordlist/ffuf is given. ponytail: curated list,
+# point ffuf at a real wordlist (--wordlist) for exhaustive discovery.
+COMMON_PATHS = [
+    ".git/HEAD", ".git/config", ".env", ".env.local", ".DS_Store", "backup.zip",
+    "backup.sql", "db.sql", "config.php", "wp-config.php.bak", "phpinfo.php",
+    "admin/", "administrator/", "login", "wp-login.php", "dashboard", "api/",
+    "api/docs", "swagger.json", "openapi.json", "graphql", "actuator/health",
+    "actuator/env", "server-status", "debug", "test", ".well-known/security.txt",
+    "robots.txt", "sitemap.xml", "status", "metrics", ".svn/entries", "console",
+]
+_DISCOVERY_CODES = {200, 204, 301, 302, 307, 401, 403}
+
+
+def _ffuf_discovery(base_url: str, wordlist: str) -> list[dict]:
+    import json
+    import os
+    import tempfile
+
+    tf = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    tf.close()
+    run(["ffuf", "-u", urljoin(base_url, "FUZZ"), "-w", wordlist, "-mc",
+         ",".join(map(str, sorted(_DISCOVERY_CODES))), "-of", "json", "-o", tf.name, "-s"], 600)
+    try:
+        data = json.loads(open(tf.name).read() or "{}")
+    except (ValueError, OSError):
+        data = {}
+    finally:
+        os.unlink(tf.name)
+    return [{"path": r["input"]["FUZZ"], "url": r["url"], "status": r["status"],
+             "source": "ffuf"} for r in data.get("results", [])]
+
+
+def _py_discovery(base_url: str, paths: list[str], session, rate: float) -> list[dict]:
+    def probe(p: str) -> dict | None:
+        url = urljoin(base_url, p)
+        try:
+            r = session.get(url, headers=UA, timeout=10, allow_redirects=False)
+        except requests.RequestException:
+            return None
+        if r.status_code in _DISCOVERY_CODES:
+            return {"path": p, "url": url, "status": r.status_code, "source": "python"}
+        return None
+
+    if rate:  # prod: sequential + throttled
+        out = []
+        for p in paths:
+            if (h := probe(p)):
+                out.append(h)
+            time.sleep(rate)
+        return out
+    with ThreadPoolExecutor(max_workers=20) as ex:  # dev: parallel
+        return [h for h in ex.map(probe, paths) if h]
+
+
+def content_discovery(base_url: str, scope, wordlist: str | None = None,
+                      rate: float = 0.0, session=None) -> list[dict]:
+    """Find exposed paths/files. ffuf when available + a wordlist, else curated list."""
+    scope.require(base_url)
+    if wordlist and have("ffuf"):
+        hits = _ffuf_discovery(base_url, wordlist)
+        if hits:
+            return hits
+    return _py_discovery(base_url, COMMON_PATHS, session or requests.Session(), rate)
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.active (socket scan, deterministic)
     import threading
 
@@ -203,5 +268,22 @@ if __name__ == "__main__":  # self-check: python -m metsec.active (socket scan, 
     assert any(f["action"].endswith("/login") and f["method"] == "post"
                and f["inputs"][0]["name"] == "user" for f in out["forms"]), out["forms"]
     assert "/api/secret" in out["endpoints"] and "/api/users" in out["endpoints"], out["endpoints"]
+
+    # content discovery: /.env and /admin/ exposed, everything else 404
+    class D(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200 if self.path in ("/.env", "/admin/") else 404)
+            self.end_headers()
+            self.wfile.write(b"x")
+
+        def log_message(self, *a):
+            pass
+
+    dsrv = HTTPServer(("127.0.0.1", 0), D)
+    threading.Thread(target=dsrv.serve_forever, daemon=True).start()
+    hits = content_discovery(f"http://127.0.0.1:{dsrv.server_address[1]}/", scope)
+    paths = {h["path"] for h in hits}
+    assert ".env" in paths and "admin/" in paths, paths
+    dsrv.shutdown()
     web.shutdown()
     print("active self-check ok")
