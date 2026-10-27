@@ -63,13 +63,20 @@ class Agent:
             hits += CveIndex().search(f"{tech} {version}".strip(), k=5)
         except Exception:  # noqa: BLE001 — index may be absent; research still works
             pass
+        from .exploitdb import exploits_for
+
         out, seen = [], set()
         for h in hits:
             if h["id"] in seen:
                 continue
             seen.add(h["id"])
-            out.append({"id": h["id"], "summary": h["summary"][:200],
-                        "severity": h.get("severity", "")})
+            item = {"id": h["id"], "summary": h["summary"][:200],
+                    "severity": h.get("severity", "")}
+            ex = exploits_for(h["id"])  # public exploit available? (big prioritization signal)
+            if ex:
+                item["public_exploits"] = [{"id": e["id"], "url": e["url"],
+                                            "metasploit": e["metasploit"]} for e in ex[:3]]
+            out.append(item)
         return out[:12]
 
     def http_probe(self, url: str, method: str = "GET", param: str | None = None,

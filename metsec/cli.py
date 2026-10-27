@@ -57,6 +57,11 @@ def rag_build(args: list[str]) -> int:
         lol = list(fetch_lolbas())
         print(f"fetched {len(tech)} GTFOBins + {len(lol)} LOLBAS technique records")
         records += tech + lol
+        from .exploitdb import update as edb_update
+        try:
+            print(f"indexed {edb_update()} CVEs with public exploits (ExploitDB)")
+        except Exception as e:  # noqa: BLE001 — enrichment is best-effort
+            print(f"exploitdb update skipped: {e}")
     n = CveIndex().build(records)
     print(f"indexed {n} CVEs → .metsec_cache/lancedb")
     return 0
