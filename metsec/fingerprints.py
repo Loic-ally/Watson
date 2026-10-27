@@ -11,8 +11,41 @@ ponytail: js/dom/dns/certIssuer fields need a JS runtime / extra probes — skip
 """
 from __future__ import annotations
 
+import json
 import re
 from functools import lru_cache
+from pathlib import Path
+
+import requests
+
+FP_DIR = Path(".metsec_cache/fingerprints")
+_BASE = "https://raw.githubusercontent.com/enthec/webappanalyzer/main/src/"
+_SHARDS = "abcdefghijklmnopqrstuvwxyz_"
+
+
+def update_db(dest: Path = FP_DIR) -> int:
+    """Download + merge the maintained Wappalyzer fingerprint DB into the cache."""
+    dest.mkdir(parents=True, exist_ok=True)
+    techs: dict = {}
+    for shard in _SHARDS:
+        r = requests.get(f"{_BASE}technologies/{shard}.json", timeout=30)
+        if r.ok:
+            techs.update(r.json())
+    if not techs:
+        raise RuntimeError("fingerprint download failed (no technologies fetched)")
+    (dest / "technologies.json").write_text(json.dumps(techs))
+    cats = requests.get(f"{_BASE}categories.json", timeout=30)
+    if cats.ok:
+        (dest / "categories.json").write_text(cats.text)
+    load_db.cache_clear()
+    return len(techs)
+
+
+@lru_cache(maxsize=1)
+def load_db(dest: str = str(FP_DIR)) -> dict:
+    """Cached fingerprint DB, or {} if not downloaded yet."""
+    f = Path(dest) / "technologies.json"
+    return json.loads(f.read_text()) if f.exists() else {}
 
 
 def _aslist(x) -> list:

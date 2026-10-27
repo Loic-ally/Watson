@@ -135,6 +135,18 @@ def recon_cmd(args: list[str]) -> int:
     return 0
 
 
+def fingerprints_cmd(args: list[str]) -> int:
+    from .fingerprints import load_db, update_db
+
+    if args and args[0] == "update":
+        print(f"downloaded {update_db()} technology fingerprints")
+        return 0
+    db = load_db()
+    print(f"{len(db)} fingerprints cached" if db
+          else "no fingerprints — run: metsec fingerprints update")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     usage = ("usage: metsec {smoke | scope <file> | rag build [--nvd-keyword K] | "
@@ -157,6 +169,8 @@ def main(argv: list[str] | None = None) -> int:
         return research_cmd(rest)
     if cmd == "recon":
         return recon_cmd(rest)
+    if cmd == "fingerprints":
+        return fingerprints_cmd(rest)
     print(usage)
     return 2
 
