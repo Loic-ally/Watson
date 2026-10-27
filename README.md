@@ -34,6 +34,7 @@ metsec rag build --nvd-keyword log4j   # + enrich with NVD hits for a product
 metsec rag search "apache log4j rce" -k 3   # query the index (--kev, --min-cvss X)
 metsec research lodash 4.17.4 --ecosystem npm   # live vuln research for a tech+version
 metsec research node 18.12.0 --save             # web-researched vulns, learned into the index
+metsec fingerprints update                      # download the 7.6k-signature tech DB
 metsec recon http://localhost:3000 --scope scope.yaml --research   # fingerprint + find vulns
 ```
 

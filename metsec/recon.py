@@ -30,22 +30,25 @@ _VERSION = r"(\d+\.\d+(?:\.\d+)?)"
 class Tech:
     name: str
     version: str = ""
-    source: str = ""      # header | script | meta
+    source: str = ""      # header | script | meta | wappalyzer
     evidence: str = ""
+    cpe: str = ""         # from the fingerprint DB → CVE correlation later
 
 
 class _Assets(HTMLParser):
     def __init__(self):
         super().__init__()
         self.assets: list[str] = []
-        self.generators: list[str] = []
+        self.metas: dict[str, str] = {}
 
     def handle_starttag(self, tag, attrs):
         d = dict(attrs)
         if tag in ("script", "link") and (d.get("src") or d.get("href")):
             self.assets.append(d.get("src") or d["href"])
-        elif tag == "meta" and d.get("name", "").lower() == "generator" and d.get("content"):
-            self.generators.append(d["content"])
+        elif tag == "meta" and d.get("content"):
+            key = (d.get("name") or d.get("property") or "").lower()
+            if key:
+                self.metas[key] = d["content"]
 
 
 def _from_header(name: str, value: str) -> list[Tech]:
@@ -79,25 +82,45 @@ def _from_generator(content: str) -> Tech | None:
 
 
 def _dedup(techs: list[Tech]) -> list[Tech]:
-    seen: dict[tuple, Tech] = {}
+    """Merge by name (case-insensitive), keeping the first version/cpe we learn."""
+    by: dict[str, Tech] = {}
     for t in techs:
-        seen.setdefault((t.name, t.version), t)
-    return list(seen.values())
+        cur = by.get(t.name.lower())
+        if not cur:
+            by[t.name.lower()] = t
+        else:
+            cur.version = cur.version or t.version
+            cur.cpe = cur.cpe or t.cpe
+    return list(by.values())
 
 
 def fingerprint(url: str) -> dict:
-    """Passive fingerprint of one URL → inventory dict."""
+    """Passive fingerprint of one URL → inventory dict (heuristics + Wappalyzer DB)."""
+    from .fingerprints import detect, load_db
+
     r = requests.get(url, headers=UA, timeout=20, allow_redirects=True)
     present = {k.lower() for k in r.headers}
     techs: list[Tech] = []
     for h in HEADER_TECH:
         if h in r.headers:
             techs += _from_header(h, r.headers[h])
-    if "html" in r.headers.get("content-type", "").lower():
+    html = r.text if "html" in r.headers.get("content-type", "").lower() else ""
+    assets, metas = [], {}
+    if html:
         p = _Assets()
-        p.feed(r.text)
-        techs += [t for s in p.assets if (t := _from_asset(s))]
-        techs += [t for g in p.generators if (t := _from_generator(g))]
+        p.feed(html)
+        assets, metas = p.assets, p.metas
+        techs += [t for s in assets if (t := _from_asset(s))]
+        if "generator" in metas and (t := _from_generator(metas["generator"])):
+            techs.append(t)
+    db = load_db()
+    if db:
+        evidence = {"url": url, "headers": {k.lower(): v for k, v in r.headers.items()},
+                    "cookies": {c.name: c.value for c in r.cookies},
+                    "metas": metas, "scripts": assets, "html": html}
+        techs += [Tech(d["name"], d["version"], "wappalyzer",
+                       f"conf={d['confidence']}", d.get("cpe", ""))
+                  for d in detect(evidence, db)]
     return {
         "url": url,
         "status": r.status_code,
