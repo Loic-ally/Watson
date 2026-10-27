@@ -7,13 +7,20 @@ prod is detection-first (safe GET only), dev may send payloads.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from urllib.parse import unquote
 
 import requests
 
 from .scope import OutOfScope
 
 UA = {"User-Agent": "Mozilla/5.0 (MetSec agent)"}
+
+# Injection metacharacters that mark an exploitation payload (cmd/XSS/SSTI/SQLi/
+# path traversal). Blocked in prod so detection-first is actually enforced — even
+# when the payload is baked into the URL rather than passed as param/value.
+_PROD_BLOCK = re.compile(r"""[;|&<>`'"$]|\{\{|\.\./|\$\(""")
 
 
 @dataclass
@@ -64,8 +71,11 @@ class Agent:
             return {"error": "static mode: no network probes"}
         method = method.upper()
         payloaded = bool(param and value is not None)
-        if self.scope.mode == "prod" and (method != "GET" or payloaded):
-            return {"error": "prod mode: only safe GET probes (no payloads) allowed"}
+        if self.scope.mode == "prod":
+            probe = unquote(url) + " " + (unquote(str(value)) if value is not None else "")
+            if method != "GET" or _PROD_BLOCK.search(probe):
+                return {"error": "prod mode: detection-first — mutating or injection "
+                                 "probes are blocked (use dev mode to exploit)"}
         params = {param: value} if payloaded and method == "GET" else None
         data = {param: value} if payloaded and method != "GET" else None
         try:
@@ -232,8 +242,12 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert r["status"] == 200 and r["reflected"], r  # payload reflected back
 
     prod = Agent(Scope(ips=["127.0.0.1"], authorized_by="t", mode="prod"), base)
-    assert "error" in prod.http_probe(f"{base}/x", "POST", "a", "b"), "prod must block payloads"
+    assert "error" in prod.http_probe(f"{base}/x", "POST", "a", "b"), "prod blocks non-GET"
+    assert "error" in prod.http_probe(f"{base}/ping?host=1;id"), "prod blocks URL injection"
+    assert "error" in prod.http_probe(f"{base}/ping?host=1%3Bid"), "prod blocks encoded injection"
+    assert "error" in prod.http_probe(f"{base}/s?q=<script>"), "prod blocks XSS payload"
     assert prod.http_probe(f"{base}/x")["status"] == 200, "prod allows safe GET"
+    assert prod.http_probe(f"{base}/profile?id=1")["status"] == 200, "prod allows benign param"
     assert "out of scope" in dev.dispatch("http_probe", {"url": "http://evil.com/"})["error"]
 
     dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed")
