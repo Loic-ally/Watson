@@ -22,6 +22,12 @@ UA = {"User-Agent": "Mozilla/5.0 (MetSec agent)"}
 # when the payload is baked into the URL rather than passed as param/value.
 _PROD_BLOCK = re.compile(r"""[;|&<>`'"$]|\{\{|\.\./|\$\(""")
 
+# Commands refused even in exploit mode — box-destroyers, not pentest actions.
+# Guards against the model accidentally wrecking the (often the operator's own) host.
+_CATASTROPHIC = re.compile(
+    r"\brm\s+-[rf]*\s+(/|~|\*)|\bmkfs\b|\bdd\b.*\bof=/dev/|>\s*/dev/sd|\bwipefs\b|"
+    r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b|:\(\)\s*\{\s*:\|:", re.I)
+
 
 @dataclass
 class Finding:
@@ -44,6 +50,7 @@ class Agent:
         self.exploit = exploit  # authorized aggressive exploitation (lifts prod gate)
         self.session = requests.Session()
         self.findings: list[Finding] = []
+        self.channel = None  # exec foothold once established
 
     def search_vulns(self, tech: str, version: str = "") -> list[dict]:
         """Known vulns for a tech+version (OSV/web research + the CVE index)."""
@@ -101,9 +108,36 @@ class Agent:
                                      evidence, remediation, refs or []))
         return {"recorded": True, "count": len(self.findings)}
 
+    def establish_foothold(self, url: str, param: str, kind: str = "auto",
+                           base: str = "127.0.0.1") -> dict:
+        """Turn a confirmed web RCE (cmd injection / SSTI) into command execution."""
+        if not self.exploit:
+            return {"error": "foothold requires exploitation to be enabled (--exploit)"}
+        self.scope.require(url)
+        if self.scope.mode == "static":
+            return {"error": "static mode: no network"}
+        from .exec_channel import establish
+        ch, proof = establish(self.session, url, param, kind, base)
+        if not ch:
+            return {"error": "no working exec vector at this url/param"}
+        self.channel = ch
+        return {"foothold": ch.kind, "url": url, "param": param, "whoami": proof[:300]}
+
+    def run_command(self, command: str) -> dict:
+        """Run a shell command through the established foothold (enumeration/privesc)."""
+        if not self.exploit:
+            return {"error": "run_command requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        if _CATASTROPHIC.search(command):
+            return {"error": "refused: destructive command blocked"}
+        return {"output": self.channel.run(command)[:3000]}
+
     def dispatch(self, name: str, args: dict) -> dict:
         fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
-              "record_finding": self.record_finding}.get(name)
+              "record_finding": self.record_finding,
+              "establish_foothold": self.establish_foothold,
+              "run_command": self.run_command}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -144,6 +178,23 @@ TOOLS = [
             "remediation": {"type": "string"},
             "refs": {"type": "array", "items": {"type": "string"}}},
             "required": ["title", "severity"]}}},
+    {"type": "function", "function": {
+        "name": "establish_foothold",
+        "description": "After confirming a web RCE (command injection or SSTI), turn it into "
+                       "command execution on the host. Give the vulnerable url and parameter; "
+                       "returns the foothold type and id/whoami. Requires exploitation enabled.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string"}, "param": {"type": "string"},
+            "kind": {"type": "string", "enum": ["auto", "cmd-injection", "ssti"]},
+            "base": {"type": "string", "description": "benign base value, e.g. 127.0.0.1"}},
+            "required": ["url", "param"]}}},
+    {"type": "function", "function": {
+        "name": "run_command",
+        "description": "Run ONE shell command on the target through the established foothold "
+                       "(host enumeration and privilege escalation). Destructive commands are "
+                       "refused.",
+        "parameters": {"type": "object", "properties": {"command": {"type": "string"}},
+                       "required": ["command"]}}},
 ]
 
 SYSTEM = (
@@ -162,7 +213,11 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "enumerating ids, forge/replay session cookies, and chain requests to prove "
                 "impact. Report 'verified' ONLY for issues you concretely exploited or "
                 "confirmed; DROP anything you could not confirm rather than reporting it as "
-                "potential — do not pad the report with speculation.")
+                "potential — do not pad the report with speculation. When you confirm a remote "
+                "code execution vuln, call establish_foothold to get command execution, then "
+                "run_command to enumerate the host (id, uname -a, sudo -l, SUID binaries, cron, "
+                "readable secrets) and escalate privileges — use search_vulns for GTFOBins "
+                "privilege-escalation techniques on binaries you find, and reason beyond them.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -281,6 +336,21 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert exp.http_probe(f"{base}/ping?host=1;id")["status"] == 200, "exploit lifts prod gate"
     r = dev.http_probe(f"{base}/p", cookie="session=forged")
     assert "session=forged" in r["snippet"], "cookie sent"
+
+    # foothold tools: gated by exploit, need a channel, destructive commands refused
+    assert "requires exploitation" in dev.run_command("id")["error"]
+    assert "no foothold" in exp.run_command("id")["error"]
+
+    class _Dummy:
+        kind = "test"
+
+        def run(self, c):
+            return "ran:" + c
+
+    exp.channel = _Dummy()
+    assert exp.run_command("sudo -l")["output"] == "ran:sudo -l"
+    assert "destructive" in exp.run_command("rm -rf /")["error"]
+    assert "destructive" in exp.run_command("mkfs.ext4 /dev/sda1")["error"]
 
     dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed")
     assert len(dev.findings) == 1 and dev.findings[0].status == "verified"
