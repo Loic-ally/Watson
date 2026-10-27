@@ -26,7 +26,7 @@ kind is given. If you do not agree, do not use MetSec.
 - [x] **Phase 1** — CVE RAG (CISA KEV + NVD-by-keyword → local embeddings → LanceDB)
 - [x] **Phase 2** — recon: Wappalyzer fingerprinting + active (crawl, content/port scan, auth)
 - [x] **Phase 3** — agent loop (Muse plans → probes via tools → verifies → records findings)
-- [ ] **Phase 4** — reporting
+- [x] **Phase 4** — reporting (dedup/rank → findings.json + Markdown)
 - [ ] **Phase 5** — hardening & CLI UX
 
 ## Setup
@@ -59,8 +59,14 @@ Wonder, which drives a bounded loop over a **defensive toolset** — `search_vul
 (OSV/web/CVE index), `http_probe` (scope- and mode-gated single requests), and
 `record_finding`. The model plans and correlates; the tools do the probing. It
 records only evidence-backed findings, marking each `verified` (confirmed by a probe)
-or `potential` (version/inference), with severity and remediation. `--active` adds
-crawl/scan first; `--budget N` caps model turns.
+or `potential` (version/inference), with severity and remediation.
+
+- `--active` adds crawl/scan first; `--budget N` caps model turns.
+- `--exploit` authorizes aggressive exploitation — lifts the prod detection-first gate,
+  tests injection/IDOR/forged sessions, and drops anything it can't concretely confirm.
+  ⚠️ only for systems you own/are authorized to break.
+- `--out <dir>` writes `findings.json` + `report.md` (ranked critical→info, with scope,
+  mode, exploit flag, and evidence).
 
 ## How it finds vulnerabilities
 

@@ -168,12 +168,17 @@ def fingerprints_cmd(args: list[str]) -> int:
 
 def assess_cmd(args: list[str]) -> int:
     """Full assessment: recon + agent loop → prioritized findings."""
+    from datetime import datetime, timezone
+
     from .agent import assess
+    from .report import dedup_rank, write_reports
 
     if "--scope" not in args:
-        print("usage: metsec assess [<url>] --scope <file> [--active] [--exploit] [--budget N]")
+        print("usage: metsec assess [<url>] --scope <file> "
+              "[--active] [--exploit] [--budget N] [--out <dir>]")
         return 2
     budget = int(args[args.index("--budget") + 1]) if "--budget" in args else 16
+    out_dir = args[args.index("--out") + 1] if "--out" in args else None
     target = args[0] if args and not args[0].startswith("--") else None
     exploit = "--exploit" in args
     if exploit:
@@ -188,11 +193,8 @@ def assess_cmd(args: list[str]) -> int:
     except (OutOfScope, FileNotFoundError) as e:
         print(f"refused: {e}")
         return 1
-    if not findings:
-        print("no findings")
-        return 0
-    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    for f in sorted(findings, key=lambda x: order.get(x.severity, 9)):
+    findings = dedup_rank(findings)
+    for f in findings:
         print(f"\n[{f.severity.upper()} · {f.status}] {f.title}")
         if f.affected:
             print(f"  affected: {f.affected}")
@@ -202,7 +204,13 @@ def assess_cmd(args: list[str]) -> int:
             print(f"  fix: {f.remediation[:160]}")
         if f.refs:
             print(f"  refs: {', '.join(str(r) for r in f.refs[:3])}")
-    print(f"\n{len(findings)} finding(s)")
+    print(f"\n{len(findings)} finding(s)" if findings else "no findings")
+    if out_dir:
+        meta = {"target": target or s.code_path, "mode": s.mode, "exploit": exploit,
+                "authorized_by": s.authorized_by,
+                "date": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        j, m = write_reports(findings, meta, out_dir)
+        print(f"\nwrote {j}  and  {m}")
     return 0
 
 
