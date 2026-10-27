@@ -1,0 +1,30 @@
+# Copy to scope.yaml and edit. MetSec refuses to run without this.
+# Only list targets you own or are explicitly authorized to test.
+
+authorized_by: "Your Name <you@example.com>"   # required: who authorizes this scan
+
+# Mode gates how aggressive the agent may be (static proposes → dev confirms → prod validates):
+#   static — code only, no traffic        (needs code_path)
+#   dev    — exploit a local app freely    (needs domains/ips, e.g. localhost)
+#   prod   — live site, detection-first    (needs domains/ips + authorization)
+mode: prod
+
+# static mode only — path to the source to analyze:
+# code_path: ./src
+
+domains:
+  - example.com          # matches example.com and *.example.com
+  - "*.staging.example.com"
+ips:
+  - 10.0.0.0/24          # CIDR or single IP
+
+# Optional. Omit for an unauthenticated scan (public surface only).
+# Unlocks the authenticated surface (IDOR, access control, privilege escalation).
+# Use dedicated least-privilege TEST accounts — never your real admin login.
+# Credential VALUES go in .env; here you only name the env vars to read.
+# auth:
+#   login_url: https://example.com/login
+#   accounts:
+#     - { user_env: TEST_USER1, pass_env: TEST_PASS1, role: user }
+#     - { user_env: TEST_USER2, pass_env: TEST_PASS2, role: user }   # second user → IDOR
+#     - { user_env: TEST_ADMIN, pass_env: TEST_ADMIN_PASS, role: admin }
