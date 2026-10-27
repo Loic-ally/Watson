@@ -1,0 +1,8 @@
+.venv/
+.env
+scope.yaml
+__pycache__/
+*.egg-info/
+*.pyc
+.metsec_cache/
+ROADMAP.md
