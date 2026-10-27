@@ -37,10 +37,11 @@ class Finding:
 class Agent:
     """Holds scan state and exposes the tools the model may call."""
 
-    def __init__(self, scope, target: str, budget: int = 16):
+    def __init__(self, scope, target: str, budget: int = 16, exploit: bool = False):
         self.scope = scope
         self.target = target
         self.budget = budget
+        self.exploit = exploit  # authorized aggressive exploitation (lifts prod gate)
         self.session = requests.Session()
         self.findings: list[Finding] = []
 
@@ -63,24 +64,29 @@ class Agent:
                         "severity": h.get("severity", "")})
         return out[:12]
 
-    def http_probe(self, url: str, method: str = "GET",
-                   param: str | None = None, value: str | None = None) -> dict:
-        """Send one request (scope- and mode-gated). Reports status/length/reflection."""
+    def http_probe(self, url: str, method: str = "GET", param: str | None = None,
+                   value: str | None = None, cookie: str | None = None) -> dict:
+        """Send one request (scope- and mode-gated). Reports status/length/reflection.
+
+        `cookie` sets a raw Cookie header (e.g. to test forged sessions). In prod,
+        injection payloads are blocked unless exploitation is enabled.
+        """
         self.scope.require(url)
         if self.scope.mode == "static":
             return {"error": "static mode: no network probes"}
         method = method.upper()
         payloaded = bool(param and value is not None)
-        if self.scope.mode == "prod":
+        if self.scope.mode == "prod" and not self.exploit:
             probe = unquote(url) + " " + (unquote(str(value)) if value is not None else "")
             if method != "GET" or _PROD_BLOCK.search(probe):
-                return {"error": "prod mode: detection-first — mutating or injection "
-                                 "probes are blocked (use dev mode to exploit)"}
+                return {"error": "prod mode: detection-first — mutating or injection probes "
+                                 "are blocked (enable exploitation or use dev mode)"}
         params = {param: value} if payloaded and method == "GET" else None
         data = {param: value} if payloaded and method != "GET" else None
+        headers = {**UA, "Cookie": cookie} if cookie else UA
         try:
             r = self.session.request(method, url, params=params, data=data,
-                                     headers=UA, timeout=15, allow_redirects=False)
+                                     headers=headers, timeout=15, allow_redirects=False)
         except requests.RequestException as e:
             return {"error": str(e)[:120]}
         body = r.text[:2000]
@@ -124,7 +130,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "url": {"type": "string"},
             "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]},
-            "param": {"type": "string"}, "value": {"type": "string"}},
+            "param": {"type": "string"}, "value": {"type": "string"},
+            "cookie": {"type": "string", "description": "raw Cookie header, e.g. to test a forged session"}},
             "required": ["url"]}}},
     {"type": "function", "function": {
         "name": "record_finding",
@@ -140,15 +147,21 @@ TOOLS = [
 ]
 
 SYSTEM = (
-    "You are MetSec, an authorized defensive security agent pentesting the operator's OWN "
-    "site (authorization is already verified via scope). Investigate the recon inventory "
-    "using the tools: look up vulnerabilities for detected tech+versions, and probe "
-    "in-scope URLs to confirm conditions. Record a finding ONLY when backed by concrete "
-    "evidence — a version match, a tool result, an exposed path, a reflected payload, or a "
-    "missing security header. Mark status 'verified' only if you confirmed it, else "
-    "'potential'. Prefer detection over exploitation. Never invent vulnerabilities. "
-    "Stop calling tools when the investigation is complete."
+    "You are MetSec, an authorized security agent pentesting the operator's OWN site "
+    "(authorization is already verified via scope). Investigate the recon inventory using "
+    "the tools: look up vulnerabilities for detected tech+versions, and probe in-scope URLs "
+    "to confirm conditions. Record a finding ONLY when backed by concrete evidence — a "
+    "version match, a tool result, an exposed path, a reflected payload, or a missing "
+    "security header. Never invent vulnerabilities. Stop calling tools when done."
 )
+DETECTION_NOTE = (" Prefer detection over exploitation. Mark a finding 'verified' only when a "
+                  "probe confirmed it, otherwise 'potential'.")
+EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break the target: "
+                "send injection payloads (SQLi, XSS, SSTI, command injection), test IDOR by "
+                "enumerating ids, forge/replay session cookies, and chain requests to prove "
+                "impact. Report 'verified' ONLY for issues you concretely exploited or "
+                "confirmed; DROP anything you could not confirm rather than reporting it as "
+                "potential — do not pad the report with speculation.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -170,7 +183,7 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     from . import config
 
     msgs = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": SYSTEM + (EXPLOIT_NOTE if agent.exploit else DETECTION_NOTE)},
         {"role": "user", "content": f"Recon inventory for {agent.target}:\n"
          + json.dumps(inventory, default=str)[:7000]
          + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
@@ -199,7 +212,8 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     return agent.findings
 
 
-def assess(target: str | None, scope, active: bool = False, budget: int = 16) -> list[Finding]:
+def assess(target: str | None, scope, active: bool = False, budget: int = 16,
+           exploit: bool = False) -> list[Finding]:
     """Full assessment: gather evidence (mode-appropriate) → agent loop → findings."""
     if scope.mode == "static":
         from .static import analyze
@@ -211,7 +225,7 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16) ->
         if active:
             from .active import active_recon
             inv.update(active_recon(target, scope))
-    agent = Agent(scope, target or scope.code_path, budget)
+    agent = Agent(scope, target or scope.code_path, budget, exploit=exploit)
     run_agent(agent, _inventory_json(inv))
     return agent.findings
 
@@ -227,7 +241,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(b"echo:" + self.path.encode())
+            self.wfile.write(b"echo:" + self.path.encode()
+                             + b" cookie:" + self.headers.get("Cookie", "").encode())
 
         def log_message(self, *a):
             pass
@@ -249,6 +264,11 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert prod.http_probe(f"{base}/x")["status"] == 200, "prod allows safe GET"
     assert prod.http_probe(f"{base}/profile?id=1")["status"] == 200, "prod allows benign param"
     assert "out of scope" in dev.dispatch("http_probe", {"url": "http://evil.com/"})["error"]
+
+    exp = Agent(Scope(ips=["127.0.0.1"], authorized_by="t", mode="prod"), base, exploit=True)
+    assert exp.http_probe(f"{base}/ping?host=1;id")["status"] == 200, "exploit lifts prod gate"
+    r = dev.http_probe(f"{base}/p", cookie="session=forged")
+    assert "session=forged" in r["snippet"], "cookie sent"
 
     dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed")
     assert len(dev.findings) == 1 and dev.findings[0].status == "verified"
