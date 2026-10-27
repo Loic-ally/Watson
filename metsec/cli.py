@@ -180,7 +180,7 @@ def assess_cmd(args: list[str]) -> int:
 
     if "--scope" not in args:
         print("usage: metsec assess [<url>] --scope <file> "
-              "[--active] [--exploit] [--budget N] [--out <dir>]")
+              "[--active] [--exploit] [--budget N] [--out <dir>] [--fresh]")
         return 2
     budget = int(args[args.index("--budget") + 1]) if "--budget" in args else 16
     out_dir = args[args.index("--out") + 1] if "--out" in args else None
@@ -194,7 +194,8 @@ def assess_cmd(args: list[str]) -> int:
         if s.mode != "static" and not target:
             print("non-static mode needs a target url")
             return 2
-        findings = assess(target, s, active="--active" in args, budget=budget, exploit=exploit)
+        findings = assess(target, s, active="--active" in args, budget=budget,
+                          exploit=exploit, fresh="--fresh" in args)
     except (OutOfScope, FileNotFoundError) as e:
         print(f"refused: {e}")
         return 1

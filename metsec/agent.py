@@ -322,20 +322,27 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 
 
 def assess(target: str | None, scope, active: bool = False, budget: int = 16,
-           exploit: bool = False) -> list[Finding]:
+           exploit: bool = False, fresh: bool = False) -> list[Finding]:
     """Full assessment: gather evidence (mode-appropriate) → agent loop → findings."""
-    if scope.mode == "static":
-        from .static import analyze
-        inv = analyze(scope.code_path)
-        target = scope.code_path
-    else:
-        from .recon import recon
-        inv = recon(target, scope)
-        if active:
-            from .active import active_recon
-            inv.update(active_recon(target, scope))
-    agent = Agent(scope, target or scope.code_path, budget, exploit=exploit)
-    run_agent(agent, _inventory_json(inv))
+    from . import cache
+
+    target = target or scope.code_path
+    ckey = (target, scope.mode, active)
+    inv = None if fresh else cache.get(ckey)
+    if inv is None:
+        if scope.mode == "static":
+            from .static import analyze
+            raw = analyze(scope.code_path)
+        else:
+            from .recon import recon
+            raw = recon(target, scope)
+            if active:
+                from .active import active_recon
+                raw.update(active_recon(target, scope))
+        inv = _inventory_json(raw)
+        cache.put(inv, ckey)
+    agent = Agent(scope, target, budget, exploit=exploit)
+    run_agent(agent, inv)
     return agent.findings
 
 
