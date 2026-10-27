@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 .metsec_cache/
 ROADMAP.md
+testbed/vulnapp.db
