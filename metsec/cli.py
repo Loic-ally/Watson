@@ -220,11 +220,32 @@ def assess_cmd(args: list[str]) -> int:
     return 0
 
 
+def scan_cmd(args: list[str]) -> int:
+    """One-shot full scan: ensure the index exists, run active assess, write a report."""
+    import time
+
+    from .rag import CveIndex
+
+    try:
+        CveIndex().search("probe", k=1)
+    except Exception:  # noqa: BLE001 — index missing on first run
+        print("building CVE + technique index (first run)…")
+        from .rag import fetch_kev
+        from .techniques import fetch_gtfobins
+        CveIndex().build(list(fetch_kev()) + list(fetch_gtfobins()))
+    a = list(args)
+    if "--active" not in a:
+        a.append("--active")
+    if "--out" not in a:
+        a += ["--out", f"metsec-report-{time.strftime('%Y%m%d-%H%M%S')}"]
+    return assess_cmd(a)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     usage = ("usage: metsec {smoke | scope <file> | rag build [--nvd-keyword K] | "
              "rag search \"<q>\" | research <name> <version> | recon <url> --scope <file> | "
-             "assess <url> --scope <file>}")
+             "assess <url> --scope <file> | scan <url> --scope <file>}")
     if not argv:
         print(usage)
         return 2
@@ -247,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         return fingerprints_cmd(rest)
     if cmd == "assess":
         return assess_cmd(rest)
+    if cmd == "scan":
+        return scan_cmd(rest)
     print(usage)
     return 2
 
