@@ -11,6 +11,7 @@ candidates a reviewer/agent then confirms; add AST/semgrep rules if precision ma
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -51,21 +52,116 @@ RULES = [
 ]
 
 
+def _scan_regex(path: str, lines: list[str]) -> list[dict]:
+    out = []
+    for n, line in enumerate(lines, 1):
+        for rid, sev, rx, msg in RULES:
+            if rx.search(line):
+                out.append({"file": path, "line": n, "rule": rid, "severity": sev,
+                            "message": msg, "snippet": line.strip()[:160]})
+    return out
+
+
+def _callname(func) -> str:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        base = _callname(func.value)
+        return f"{base}.{func.attr}" if base else func.attr
+    return ""
+
+
+def _kw_true(node, name: str) -> bool:
+    return any(k.arg == name and isinstance(k.value, ast.Constant) and k.value.value is True
+               for k in node.keywords)
+
+
+def _refs_request(node) -> bool:
+    return any(isinstance(n, ast.Name) and n.id == "request" for n in ast.walk(node))
+
+
+class _PyVisitor(ast.NodeVisitor):
+    """AST sinks — precise: ignores parameterized queries / literal commands."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.out: list[dict] = []
+
+    def _add(self, node, rule, sev, msg):
+        self.out.append({"file": self.path, "line": getattr(node, "lineno", 0),
+                         "rule": rule, "severity": sev, "message": msg, "snippet": ""})
+
+    def _nonliteral_arg(self, node) -> bool:
+        return bool(node.args) and not isinstance(node.args[0], ast.Constant)
+
+    def visit_Call(self, node):
+        name = _callname(node.func)
+        if _kw_true(node, "shell"):
+            self._add(node, "command-injection", "high", "subprocess called with shell=True")
+        if name in ("os.system", "os.popen"):
+            self._add(node, "command-injection", "high", f"{name} runs a shell command")
+        if name.startswith("subprocess.") and self._nonliteral_arg(node):
+            self._add(node, "command-injection", "high", f"{name} with a non-literal command")
+        if name in ("eval", "exec"):
+            self._add(node, "code-exec", "high", "dynamic code execution")
+        if name == "pickle.loads":
+            self._add(node, "deserialization", "high", "unsafe pickle deserialization")
+        if name == "yaml.load" and not any(k.arg == "Loader" for k in node.keywords):
+            self._add(node, "deserialization", "high", "yaml.load without a safe Loader")
+        if name.endswith("render_template_string") and self._nonliteral_arg(node):
+            self._add(node, "ssti", "high", "template rendered from a non-literal (SSTI)")
+        if name.endswith("redirect") and node.args and _refs_request(node.args[0]):
+            self._add(node, "open-redirect", "medium", "redirect to a user-controlled value")
+        if name in ("requests.get", "requests.post", "requests.put", "requests.head") \
+                and self._nonliteral_arg(node):
+            self._add(node, "ssrf", "medium", "outbound request to a non-literal URL")
+        if _kw_true(node, "debug"):
+            self._add(node, "debug-enabled", "medium", "debug mode enabled")
+        if isinstance(node.func, ast.Attribute) and node.func.attr in ("execute", "executescript") \
+                and self._nonliteral_arg(node):
+            self._add(node, "sql-injection", "high", "SQL query from a non-literal (injection risk)")
+        self.generic_visit(node)
+
+    def visit_Constant(self, node):
+        if isinstance(node.value, str) and re.search(r"AKIA[0-9A-Z]{16}", node.value):
+            self._add(node, "hardcoded-secret", "high", "hardcoded AWS access key id")
+
+    def visit_Assign(self, node):
+        if (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+                and len(node.value.value) >= 6):
+            for t in node.targets:
+                nm = ast.unparse(t).lower()
+                if any(s in nm for s in ("secret", "password", "passwd", "api_key",
+                                         "apikey", "token")):
+                    self._add(node, "hardcoded-secret", "medium", f"hardcoded secret in {nm}")
+        self.generic_visit(node)
+
+
+def _scan_python(path: str, tree, lines: list[str]) -> list[dict]:
+    v = _PyVisitor(path)
+    v.visit(tree)
+    for f in v.out:
+        ln = f["line"]
+        f["snippet"] = lines[ln - 1].strip()[:160] if 0 < ln <= len(lines) else ""
+    return v.out
+
+
 def _scan_source(root: str) -> list[dict]:
     findings = []
     for path in Path(root).rglob("*.py"):
         if _SKIP_DIRS & set(path.parts):
             continue
         try:
-            lines = path.read_text(errors="ignore").splitlines()
+            src = path.read_text(errors="ignore")
         except OSError:
             continue
-        for n, line in enumerate(lines, 1):
-            for rid, sev, rx, msg in RULES:
-                if rx.search(line):
-                    findings.append({"file": str(path), "line": n, "rule": rid,
-                                     "severity": sev, "message": msg,
-                                     "snippet": line.strip()[:160]})
+        lines = src.splitlines()
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            findings += _scan_regex(str(path), lines)  # fall back if it won't parse
+            continue
+        findings += _scan_python(str(path), tree, lines)
     return findings
 
 
@@ -102,17 +198,27 @@ if __name__ == "__main__":  # self-check: python -m metsec.static (offline)
 
     with tempfile.TemporaryDirectory() as d:
         (Path(d) / "app.py").write_text(
-            'q = "SELECT * FROM t WHERE u=\'%s\'" % u\n'
-            'import subprocess; subprocess.getoutput("ping " + host)\n'
-            'render_template_string("Hi " + name)\n'
-            'redirect(request.args.get("next"))\n'
-            'SECRET_KEY = "dev-secret-key-change-me"\n'
-            'app.run(debug=True)\n')
+            "import subprocess, pickle\n"
+            "def f(u, host, name, cur):\n"
+            "    cur.execute('SELECT * FROM t WHERE u=' + u)\n"       # sqli (concatenated)
+            "    cur.execute('SELECT * FROM t WHERE id=?', (u,))\n"   # safe: parameterized
+            "    subprocess.getoutput('ping ' + host)\n"
+            "    subprocess.run(['ls'], shell=True)\n"
+            "    render_template_string('Hi ' + name)\n"
+            "    redirect(request.args.get('next'))\n"
+            "    requests.get(host)\n"
+            "    eval(name)\n"
+            "    pickle.loads(name)\n"
+            "SECRET_KEY = 'dev-secret-key-change-me'\n"
+            "app.run(debug=True)\n")
         (Path(d) / "requirements.txt").write_text("requests==2.19.1\nJinja2==2.10\n")
         out = analyze(d)
-        rules = {f["rule"] for f in out["code_findings"]}
-        assert {"sql-injection", "command-injection", "ssti", "open-redirect",
-                "hardcoded-secret", "debug-enabled"} <= rules, rules
+        fs = out["code_findings"]
+        rules = {f["rule"] for f in fs}
+        assert {"sql-injection", "command-injection", "ssti", "open-redirect", "ssrf",
+                "code-exec", "deserialization", "hardcoded-secret", "debug-enabled"} <= rules, rules
+        # precision win: the parameterized execute is NOT flagged, only the concatenated one
+        assert sum(f["rule"] == "sql-injection" for f in fs) == 1, fs
         names = {dep["name"] for dep in out["deps"]}
         assert names == {"requests", "jinja2"} and out["deps"][0]["version"] == "2.19.1", out["deps"]
     print("static self-check ok")
