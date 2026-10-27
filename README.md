@@ -27,7 +27,12 @@ kind is given. If you do not agree, do not use MetSec.
 - [x] **Phase 2** — recon: Wappalyzer fingerprinting + active (crawl, content/port scan, auth)
 - [x] **Phase 3** — agent loop (Muse plans → probes via tools → verifies → records findings)
 - [x] **Phase 4** — reporting (dedup/rank → findings.json + Markdown)
-- [ ] **Phase 5** — hardening & CLI UX
+- [x] **Phase 5** — UX: recon caching, streaming progress, one-command `metsec scan`
+- [x] **Phase 6** — foothold: web RCE → exec channel (cmd-injection, multi-engine SSTI, webshell)
+- [x] **Phase 7** — Linux post-exploitation: enumerate → GTFOBins privesc → root → loot
+- [ ] **Phase 8** — Windows / lateral movement / Active Directory
+
+Knowledge: CVEs (KEV/NVD/OSV) · GTFOBins · LOLBAS · ExploitDB exploit availability · MITRE ATT&CK (`--attack`).
 
 ## Setup
 
