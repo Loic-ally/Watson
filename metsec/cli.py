@@ -101,10 +101,36 @@ def research_cmd(args: list[str]) -> int:
     return 0
 
 
+def recon_cmd(args: list[str]) -> int:
+    """Scope-gated passive recon of a target URL."""
+    from .recon import recon
+
+    if not args or "--scope" not in args:
+        print("usage: metsec recon <url> --scope <file>")
+        return 2
+    target = args[0]
+    scope_path = args[args.index("--scope") + 1]
+    try:
+        s = Scope.load(scope_path)
+        inv = recon(target, s)
+    except (OutOfScope, FileNotFoundError) as e:
+        print(f"refused: {e}")
+        return 1
+    print(f"{inv['url']} → HTTP {inv['status']}  server={inv['server'] or '—'}")
+    print(f"\ntech ({len(inv['techs'])}):")
+    for t in inv["techs"]:
+        print(f"  {t.name} {t.version or '?'}  [{t.source}]")
+    if inv["missing_security_headers"]:
+        print(f"\nmissing security headers: {', '.join(inv['missing_security_headers'])}")
+    if inv["paths"]:
+        print(f"\ndisclosed paths ({len(inv['paths'])}): {', '.join(inv['paths'][:10])}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     usage = ("usage: metsec {smoke | scope <file> | rag build [--nvd-keyword K] | "
-             "rag search \"<q>\" | research <name> <version>}")
+             "rag search \"<q>\" | research <name> <version> | recon <url> --scope <file>}")
     if not argv:
         print(usage)
         return 2
@@ -121,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
             return rag_search(sargs)
     if cmd == "research":
         return research_cmd(rest)
+    if cmd == "recon":
+        return recon_cmd(rest)
     print(usage)
     return 2
 

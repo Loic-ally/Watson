@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -108,6 +108,36 @@ def fingerprint(url: str) -> dict:
     }
 
 
+def discover_paths(base_url: str) -> list[str]:
+    """Passive path disclosure from robots.txt + sitemap.xml."""
+    base = "{0.scheme}://{0.netloc}".format(urlparse(base_url))
+    paths: set[str] = set()
+    try:
+        r = requests.get(urljoin(base, "/robots.txt"), headers=UA, timeout=15)
+        if r.ok and "text" in r.headers.get("content-type", "").lower():
+            for line in r.text.splitlines():
+                m = re.match(r"(?:dis)?allow:\s*(\S+)", line.strip(), re.I)
+                if m:
+                    paths.add(m.group(1))
+    except requests.RequestException:
+        pass
+    try:
+        r = requests.get(urljoin(base, "/sitemap.xml"), headers=UA, timeout=15)
+        if r.ok:
+            paths.update(re.findall(r"<loc>\s*([^<]+?)\s*</loc>", r.text)[:50])
+    except requests.RequestException:
+        pass
+    return sorted(paths)
+
+
+def recon(target: str, scope) -> dict:
+    """Scope-gated passive recon of one target → full inventory."""
+    scope.require(target)  # refuses anything not authorized
+    inv = fingerprint(target)
+    inv["paths"] = discover_paths(target)
+    return inv
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.recon (in-process local server)
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -122,23 +152,30 @@ if __name__ == "__main__":  # self-check: python -m metsec.recon (in-process loc
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path == "/robots.txt":
+                body, ctype, extra = b"Disallow: /admin/\n", "text/plain", None
+            else:
+                body, ctype, extra = HTML, "text/html", ("X-Powered-By", "PHP/7.4.3")
             self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.send_header("X-Powered-By", "PHP/7.4.3")
+            self.send_header("Content-Type", ctype)
+            if extra:
+                self.send_header(*extra)
             self.end_headers()
-            self.wfile.write(HTML)
+            self.wfile.write(body)
 
         def log_message(self, *a):
             pass
 
     srv = HTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    inv = fingerprint(f"http://127.0.0.1:{srv.server_address[1]}/")
+    base = f"http://127.0.0.1:{srv.server_address[1]}/"
+    inv = fingerprint(base)
     found = {t.name: t.version for t in inv["techs"]}
     assert found.get("jquery") == "1.7.2", found
     assert found.get("wordpress") == "4.1", found
     assert found.get("php") == "7.4.3", found
     assert found.get("bootstrap") == "3.3.7", found
     assert "content-security-policy" in inv["missing_security_headers"]
+    assert "/admin/" in discover_paths(base)
     srv.shutdown()
     print("recon self-check ok")
