@@ -11,7 +11,7 @@ Reasoning runs on Meta Muse models; a CVE RAG gives the agent current security k
 
 - [x] **Phase 0** — API client + scope guard + smoke test
 - [x] **Phase 1** — CVE RAG (CISA KEV + NVD-by-keyword → local embeddings → LanceDB)
-- [x] **Phase 2** — recon & fingerprinting (passive; feeds research)
+- [x] **Phase 2** — recon: Wappalyzer fingerprinting + active (crawl, content/port scan, auth)
 - [ ] **Phase 3** — agent loop (plan → act → verify)
 - [ ] **Phase 4** — reporting
 - [ ] **Phase 5** — hardening & CLI UX
@@ -49,6 +49,23 @@ metsec recon http://localhost:3000 --scope scope.yaml --research   # fingerprint
 
    Deferred: Muse native *search grounding* (API param undocumented); a keyed search
    backend (Tavily/Brave) if DuckDuckGo rate-limiting becomes a problem.
+
+## Recon
+
+`metsec recon <url> --scope <file>` runs passive fingerprinting (7.6k-signature
+Wappalyzer DB + heuristics) and robots/sitemap discovery. Add `--active` for
+mode-gated active recon:
+
+- **crawl** — same-origin BFS, forms/inputs, JS endpoint mining (authenticated if
+  `scope.auth` is set)
+- **content discovery** — `ffuf` + wordlist when installed, else a curated path list
+- **port scan** — `nmap -sV` when installed, else a socket scan (`--ports`; on by
+  default in dev, opt-in in prod)
+- **nuclei** — template vuln scan when installed (`--nuclei`)
+
+External tools (`nmap`/`nuclei`/`ffuf`) are used when present; pure-Python fallbacks
+run everywhere else. Mode gates aggressiveness: `static` blocks active recon, `prod`
+throttles and is detection-first, `dev` is unthrottled.
 
 ## Stack
 

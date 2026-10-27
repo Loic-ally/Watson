@@ -106,7 +106,8 @@ def recon_cmd(args: list[str]) -> int:
     from .recon import recon
 
     if not args or "--scope" not in args:
-        print("usage: metsec recon <url> --scope <file>")
+        print("usage: metsec recon <url> --scope <file> "
+              "[--active [--ports|--no-ports] [--nuclei] [--rate S]] [--research [--no-web]]")
         return 2
     target = args[0]
     scope_path = args[args.index("--scope") + 1]
@@ -124,6 +125,24 @@ def recon_cmd(args: list[str]) -> int:
         print(f"\nmissing security headers: {', '.join(inv['missing_security_headers'])}")
     if inv["paths"]:
         print(f"\ndisclosed paths ({len(inv['paths'])}): {', '.join(inv['paths'][:10])}")
+    if "--active" in args:
+        from .active import active_recon
+
+        # ports default on in dev, opt-in in prod; both honor --ports/--no-ports
+        ports = "--ports" in args or (s.mode == "dev" and "--no-ports" not in args)
+        rate = float(args[args.index("--rate") + 1]) if "--rate" in args else 0.0
+        act = active_recon(target, s, ports=ports, nuclei="--nuclei" in args, rate=rate)
+        c = act["crawl"]
+        auth = " (authenticated)" if s.auth else ""
+        print(f"\ncrawl{auth}: {len(c['pages'])} pages, {len(c['endpoints'])} endpoints, "
+              f"{len(c['forms'])} forms")
+        print(f"content discovery: {len(act['discovery'])} hits — "
+              f"{', '.join(h['path'] for h in act['discovery'][:12])}")
+        if "ports" in act:
+            ports_str = ", ".join(f"{p['port']}/{p['service'] or '?'}" for p in act["ports"])
+            print(f"open ports: {ports_str}")
+        if "nuclei" in act:
+            print(f"nuclei: {len(act['nuclei'])} findings")
     if "--research" in args:
         from .research import from_inventory
 

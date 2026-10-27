@@ -213,6 +213,51 @@ def content_discovery(base_url: str, scope, wordlist: str | None = None,
     return _py_discovery(base_url, COMMON_PATHS, session or requests.Session(), rate)
 
 
+def nuclei_scan(target: str, timeout: int = 900) -> list[dict]:
+    """Template-based vuln scan via nuclei when installed; [] otherwise."""
+    if not have("nuclei"):
+        return []
+    import json
+
+    _, out, _ = run(["nuclei", "-u", target, "-jsonl", "-silent"], timeout)
+    findings = []
+    for line in out.splitlines():
+        try:
+            j = json.loads(line)
+        except ValueError:
+            continue
+        info = j.get("info", {})
+        findings.append({"id": j.get("template-id", ""), "name": info.get("name", ""),
+                         "severity": info.get("severity", ""),
+                         "url": j.get("matched-at") or j.get("host", "")})
+    return findings
+
+
+def active_recon(target: str, scope, ports: bool = False, nuclei: bool = False,
+                 rate: float = 0.0, max_pages: int = 50, wordlist: str | None = None) -> dict:
+    """Mode-gated active recon. static refuses; prod throttles; dev is aggressive."""
+    from .scope import OutOfScope
+
+    if scope.mode == "static":
+        raise OutOfScope("active recon is not allowed in static mode")
+    scope.require(target)
+    if scope.mode == "prod" and not rate:
+        rate = 0.3  # detection-first throttle in prod
+
+    out: dict = {}
+    if scope.auth:  # authenticated surface when creds are configured
+        from .auth import authenticated_crawl
+        out["crawl"] = authenticated_crawl(scope, target, max_pages=max_pages, rate=rate)
+    else:
+        out["crawl"] = crawl(target, scope, max_pages=max_pages, rate=rate)
+    out["discovery"] = content_discovery(target, scope, wordlist=wordlist, rate=rate)
+    if ports:
+        out["ports"] = port_scan(urlparse(target).hostname)
+    if nuclei:
+        out["nuclei"] = nuclei_scan(target)
+    return out
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.active (socket scan, deterministic)
     import threading
 
