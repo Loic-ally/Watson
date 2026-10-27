@@ -25,7 +25,7 @@ kind is given. If you do not agree, do not use MetSec.
 - [x] **Phase 0** — API client + scope guard + smoke test
 - [x] **Phase 1** — CVE RAG (CISA KEV + NVD-by-keyword → local embeddings → LanceDB)
 - [x] **Phase 2** — recon: Wappalyzer fingerprinting + active (crawl, content/port scan, auth)
-- [ ] **Phase 3** — agent loop (plan → act → verify)
+- [x] **Phase 3** — agent loop (Muse plans → probes via tools → verifies → records findings)
 - [ ] **Phase 4** — reporting
 - [ ] **Phase 5** — hardening & CLI UX
 
@@ -49,7 +49,18 @@ metsec research lodash 4.17.4 --ecosystem npm   # live vuln research for a tech+
 metsec research node 18.12.0 --save             # web-researched vulns, learned into the index
 metsec fingerprints update                      # download the 7.6k-signature tech DB
 metsec recon http://localhost:3000 --scope scope.yaml --research   # fingerprint + find vulns
+metsec assess http://localhost:3000 --scope scope.yaml             # full agent assessment
 ```
+
+## Assessment (the agent loop)
+
+`metsec assess <url> --scope <file>` runs recon, then hands the inventory to Muse
+Wonder, which drives a bounded loop over a **defensive toolset** — `search_vulns`
+(OSV/web/CVE index), `http_probe` (scope- and mode-gated single requests), and
+`record_finding`. The model plans and correlates; the tools do the probing. It
+records only evidence-backed findings, marking each `verified` (confirmed by a probe)
+or `potential` (version/inference), with severity and remediation. `--active` adds
+crawl/scan first; `--budget N` caps model turns.
 
 ## How it finds vulnerabilities
 

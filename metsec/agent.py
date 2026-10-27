@@ -98,6 +98,110 @@ class Agent:
             return {"error": f"bad args: {e}"}
 
 
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "search_vulns",
+        "description": "Known vulnerabilities for a technology and optional version "
+                       "(OSV + web research + the local CVE index).",
+        "parameters": {"type": "object", "properties": {
+            "tech": {"type": "string"}, "version": {"type": "string"}},
+            "required": ["tech"]}}},
+    {"type": "function", "function": {
+        "name": "http_probe",
+        "description": "Send ONE HTTP request to an in-scope URL and observe the response "
+                       "(status, length, whether `value` is reflected in the body). "
+                       "Mode-gated: prod allows only safe GET without payloads.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string"},
+            "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE"]},
+            "param": {"type": "string"}, "value": {"type": "string"}},
+            "required": ["url"]}}},
+    {"type": "function", "function": {
+        "name": "record_finding",
+        "description": "Record ONE grounded security finding backed by evidence you gathered.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string"},
+            "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+            "status": {"type": "string", "enum": ["potential", "verified"]},
+            "affected": {"type": "string"}, "evidence": {"type": "string"},
+            "remediation": {"type": "string"},
+            "refs": {"type": "array", "items": {"type": "string"}}},
+            "required": ["title", "severity"]}}},
+]
+
+SYSTEM = (
+    "You are MetSec, an authorized defensive security agent pentesting the operator's OWN "
+    "site (authorization is already verified via scope). Investigate the recon inventory "
+    "using the tools: look up vulnerabilities for detected tech+versions, and probe "
+    "in-scope URLs to confirm conditions. Record a finding ONLY when backed by concrete "
+    "evidence — a version match, a tool result, an exposed path, a reflected payload, or a "
+    "missing security header. Mark status 'verified' only if you confirmed it, else "
+    "'potential'. Prefer detection over exploitation. Never invent vulnerabilities. "
+    "Stop calling tools when the investigation is complete."
+)
+
+
+def _inventory_json(inv: dict) -> dict:
+    from dataclasses import asdict, is_dataclass
+
+    out = dict(inv)
+    if "techs" in out:
+        out["techs"] = [asdict(t) if is_dataclass(t) else t for t in out["techs"]]
+    if "crawl" in out:  # trim heavy fields for the prompt
+        c = out["crawl"]
+        out["crawl"] = {"forms": c.get("forms", [])[:20],
+                        "endpoints": c.get("endpoints", [])[:40]}
+    return out
+
+
+def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
+    import json
+
+    from . import config
+
+    msgs = [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": f"Recon inventory for {agent.target}:\n"
+         + json.dumps(inventory, default=str)[:7000]
+         + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
+    ]
+    for _ in range(agent.budget):
+        m = config.client().chat.completions.create(
+            model=config.BRAIN, messages=msgs, tools=TOOLS, tool_choice="auto"
+        ).choices[0].message
+        assistant: dict = {"role": "assistant", "content": m.content or ""}
+        if m.tool_calls:
+            assistant["tool_calls"] = [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in m.tool_calls]
+        msgs.append(assistant)
+        if not m.tool_calls:
+            break
+        for tc in m.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            result = agent.dispatch(tc.function.name, args)
+            msgs.append({"role": "tool", "tool_call_id": tc.id,
+                         "content": json.dumps(result, default=str)[:2000]})
+    return agent.findings
+
+
+def assess(target: str, scope, active: bool = False, budget: int = 16) -> list[Finding]:
+    """Full assessment: recon → agent loop over the evidence → findings."""
+    from .recon import recon
+
+    inv = recon(target, scope)
+    if active and scope.mode != "static":
+        from .active import active_recon
+        inv.update(active_recon(target, scope))
+    agent = Agent(scope, target, budget)
+    run_agent(agent, _inventory_json(inv))
+    return agent.findings
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, offline)
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer

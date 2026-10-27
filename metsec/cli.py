@@ -166,10 +166,44 @@ def fingerprints_cmd(args: list[str]) -> int:
     return 0
 
 
+def assess_cmd(args: list[str]) -> int:
+    """Full assessment: recon + agent loop → prioritized findings."""
+    from .agent import assess
+
+    if not args or "--scope" not in args:
+        print("usage: metsec assess <url> --scope <file> [--active] [--budget N]")
+        return 2
+    target = args[0]
+    budget = int(args[args.index("--budget") + 1]) if "--budget" in args else 16
+    try:
+        s = Scope.load(args[args.index("--scope") + 1])
+        findings = assess(target, s, active="--active" in args, budget=budget)
+    except (OutOfScope, FileNotFoundError) as e:
+        print(f"refused: {e}")
+        return 1
+    if not findings:
+        print("no findings")
+        return 0
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    for f in sorted(findings, key=lambda x: order.get(x.severity, 9)):
+        print(f"\n[{f.severity.upper()} · {f.status}] {f.title}")
+        if f.affected:
+            print(f"  affected: {f.affected}")
+        if f.evidence:
+            print(f"  evidence: {f.evidence[:160]}")
+        if f.remediation:
+            print(f"  fix: {f.remediation[:160]}")
+        if f.refs:
+            print(f"  refs: {', '.join(str(r) for r in f.refs[:3])}")
+    print(f"\n{len(findings)} finding(s)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     usage = ("usage: metsec {smoke | scope <file> | rag build [--nvd-keyword K] | "
-             "rag search \"<q>\" | research <name> <version> | recon <url> --scope <file>}")
+             "rag search \"<q>\" | research <name> <version> | recon <url> --scope <file> | "
+             "assess <url> --scope <file>}")
     if not argv:
         print(usage)
         return 2
@@ -190,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
         return recon_cmd(rest)
     if cmd == "fingerprints":
         return fingerprints_cmd(rest)
+    if cmd == "assess":
+        return assess_cmd(rest)
     print(usage)
     return 2
 
