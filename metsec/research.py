@@ -52,11 +52,39 @@ def osv_query(name: str, version: str, ecosystem: str) -> list[dict]:
 
 # ------------------------------- web ----------------------------------------
 
+def _tavily_parse(data: dict) -> list[dict]:
+    return [{"title": r.get("title", ""), "body": r.get("content", ""), "url": r.get("url", "")}
+            for r in data.get("results", [])]
+
+
+def _brave_parse(data: dict) -> list[dict]:
+    return [{"title": r.get("title", ""), "body": r.get("description", ""), "url": r.get("url", "")}
+            for r in ((data.get("web") or {}).get("results") or [])]
+
+
 def web_search(query: str, k: int = 6) -> list[dict]:
-    # ponytail: DDG rate-limits bursts and returns empty; one retry smooths it.
-    # Known ceiling — swap in a keyed API (Tavily/Brave) if flakiness bites in prod.
+    # Prefer a keyed provider when configured (reliable); fall back to DuckDuckGo.
+    import os
     import time
 
+    if (key := os.environ.get("TAVILY_API_KEY")):
+        try:
+            data = requests.post("https://api.tavily.com/search", timeout=20,
+                                 json={"api_key": key, "query": query, "max_results": k}).json()
+            if (hits := _tavily_parse(data)):
+                return hits
+        except requests.RequestException:
+            pass
+    if (key := os.environ.get("BRAVE_API_KEY")):
+        try:
+            data = requests.get("https://api.search.brave.com/res/v1/web/search", timeout=20,
+                                headers={"X-Subscription-Token": key, "Accept": "application/json"},
+                                params={"q": query, "count": k}).json()
+            if (hits := _brave_parse(data)):
+                return hits
+        except requests.RequestException:
+            pass
+    # DDG fallback: rate-limits bursts and returns empty; one retry smooths it.
     for attempt in range(2):
         try:
             from ddgs import DDGS
@@ -205,4 +233,10 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.research
            "<script>bad()</script></body></html>")
     text = " ".join(p.parts)
     assert "CVE-2022-43548" in text and "bad()" not in text and "x{}" not in text
+
+    tav = _tavily_parse({"results": [{"title": "T", "content": "body", "url": "http://t/"}]})
+    assert tav == [{"title": "T", "body": "body", "url": "http://t/"}], tav
+    brv = _brave_parse({"web": {"results": [{"title": "B", "description": "d", "url": "http://b/"}]}})
+    assert brv == [{"title": "B", "body": "d", "url": "http://b/"}], brv
+    assert _brave_parse({}) == [] and _tavily_parse({}) == []
     print("research self-check ok")
