@@ -249,7 +249,44 @@ def scan_cmd(args: list[str]) -> int:
         a.append("--active")
     if "--out" not in a:
         a += ["--out", f"metsec-report-{time.strftime('%Y%m%d-%H%M%S')}"]
+    if "--web" in a:
+        return _scan_web([x for x in a if x != "--web"])
     return assess_cmd(a)
+
+
+def _scan_web(a: list[str], port: int = 8787) -> int:
+    """Run the assessment in a thread and serve the live dashboard."""
+    import threading
+    import time
+
+    from . import events, web
+    from .scope import OutOfScope, Scope
+
+    target = a[0] if a and not a[0].startswith("--") else "(static)"
+    mode = ""
+    if "--scope" in a:
+        try:
+            mode = Scope.load(a[a.index("--scope") + 1]).mode
+        except (OutOfScope, FileNotFoundError, IndexError):
+            pass
+    events.reset()
+    events.emit("start", target=target, mode=mode)
+
+    def run():
+        time.sleep(1.2)  # let the browser connect first
+        try:
+            assess_cmd(a)
+        except Exception as e:  # noqa: BLE001 — surface on the dashboard
+            events.emit("error", msg=str(e)[:200])
+        events.emit("done")
+
+    threading.Thread(target=run, daemon=True).start()
+    print(f"\n  📊  Dashboard live: http://127.0.0.1:{port}   (Ctrl-C to stop)\n")
+    try:
+        web.serve(port)
+    except KeyboardInterrupt:
+        pass
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

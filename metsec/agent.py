@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 import requests
 
+from . import events
 from .scope import OutOfScope
 
 UA = {"User-Agent": "Mozilla/5.0 (MetSec agent)"}
@@ -114,6 +115,7 @@ class Agent:
                        refs: list | None = None) -> dict:
         self.findings.append(Finding(title, severity, status, affected,
                                      evidence, remediation, refs or []))
+        events.emit("finding", severity=severity, status=status, title=title[:120])
         return {"recorded": True, "count": len(self.findings)}
 
     def establish_foothold(self, url: str, param: str, kind: str = "auto",
@@ -129,6 +131,7 @@ class Agent:
         if not ch:
             return {"error": "no working exec vector at this url/param"}
         self.channel = ch
+        events.emit("foothold", kind=ch.kind, whoami=proof[:120])
         return {"foothold": ch.kind, "url": url, "param": param, "whoami": proof[:300]}
 
     def run_command(self, command: str) -> dict:
@@ -139,7 +142,11 @@ class Agent:
             return {"error": "no foothold — call establish_foothold first"}
         if _CATASTROPHIC.search(command):
             return {"error": "refused: destructive command blocked"}
-        return {"output": self.channel.run(command)[:3000]}
+        out = self.channel.run(command)[:3000]
+        events.emit("command", cmd=command[:160], output=out[:400])
+        if "uid=0(root)" in out:
+            events.emit("root")
+        return {"output": out}
 
     def privesc_scan(self) -> dict:
         """Enumerate the host and return GTFOBins-matched privilege-escalation candidates."""
@@ -306,6 +313,7 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
             hint = (args.get("title") or args.get("command") or args.get("url")
                     or args.get("tech") or "")
             print(f"  → {tc.function.name} {str(hint)[:72]}", file=sys.stderr, flush=True)
+            events.emit("tool", name=tc.function.name, detail=str(hint)[:100])
             msgs.append({"role": "tool", "tool_call_id": tc.id,
                          "content": json.dumps(agent.dispatch(tc.function.name, args),
                                                default=str)[:2000]})
