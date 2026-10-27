@@ -124,6 +124,14 @@ def recon_cmd(args: list[str]) -> int:
         print(f"\nmissing security headers: {', '.join(inv['missing_security_headers'])}")
     if inv["paths"]:
         print(f"\ndisclosed paths ({len(inv['paths'])}): {', '.join(inv['paths'][:10])}")
+    if "--research" in args:
+        from .research import from_inventory
+
+        print("\n=== vulnerabilities (OSV + web) ===")
+        for tech, findings in from_inventory(inv, use_web="--no-web" not in args).items():
+            print(f"\n{tech}: {len(findings)} finding(s)")
+            for f in findings[:5]:
+                print(f"  [{f['source']}] {f['id']}: {f['summary'][:90]}")
     return 0
 
 

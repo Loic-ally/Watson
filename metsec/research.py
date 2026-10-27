@@ -172,6 +172,16 @@ def research(name: str, version: str, ecosystem: str | None = None,
     return deduped
 
 
+def from_inventory(inv: dict, use_web: bool = True) -> dict[str, list[dict]]:
+    """Research every versioned tech in a recon inventory → {`name version`: findings}."""
+    out: dict[str, list[dict]] = {}
+    for t in inv.get("techs", []):
+        name, version = getattr(t, "name", ""), getattr(t, "version", "")
+        if name and version:
+            out[f"{name} {version}"] = research(name, version, use_web=use_web)
+    return out
+
+
 if __name__ == "__main__":  # offline self-check: python -m metsec.research
     sample = {"vulns": [{
         "id": "GHSA-jf85-cpcp-j695",
