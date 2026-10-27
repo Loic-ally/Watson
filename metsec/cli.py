@@ -51,6 +51,11 @@ def rag_build(args: list[str]) -> int:
         nvd = list(fetch_nvd(keyword=kw, api_key=os.environ.get("NVD_API_KEY")))
         print(f"fetched {len(nvd)} NVD records for {kw!r}")
         records += nvd
+    if "--techniques" in args:
+        from .techniques import fetch_gtfobins
+        tech = list(fetch_gtfobins())
+        print(f"fetched {len(tech)} GTFOBins technique records")
+        records += tech
     n = CveIndex().build(records)
     print(f"indexed {n} CVEs → .metsec_cache/lancedb")
     return 0

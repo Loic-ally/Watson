@@ -43,6 +43,7 @@ cp scope.example.yaml scope.yaml        # then edit to your targets
 metsec smoke                       # verify API key + model routing
 metsec scope scope.yaml            # validate a scope file
 metsec rag build                   # build the CVE index from CISA KEV
+metsec rag build --techniques      # + GTFOBins privesc/post-ex techniques (MITRE-tagged)
 metsec rag build --nvd-keyword log4j   # + enrich with NVD hits for a product
 metsec rag search "apache log4j rce" -k 3   # query the index (--kev, --min-cvss X)
 metsec research lodash 4.17.4 --ecosystem npm   # live vuln research for a tech+version
