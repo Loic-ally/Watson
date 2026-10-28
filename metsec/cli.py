@@ -206,7 +206,8 @@ def assess_cmd(args: list[str]) -> int:
             print("non-static mode needs a target url")
             return 2
         result = assess(target, s, active="--active" in args, budget=budget,
-                        exploit=exploit, fresh="--fresh" in args)
+                        exploit=exploit, fresh="--fresh" in args,
+                        revalidate="--revalidate" in args)
     except (OutOfScope, FileNotFoundError) as e:
         print(f"refused: {e}")
         return 1

@@ -513,7 +513,7 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 
 
 def assess(target: str | None, scope, active: bool = False, budget: int = 16,
-           exploit: bool = False, fresh: bool = False) -> "Agent":
+           exploit: bool = False, fresh: bool = False, revalidate: bool = False) -> "Agent":
     """Full assessment: gather evidence → agent loop. Returns the Agent (.findings/.hypotheses)."""
     import time
 
@@ -542,6 +542,11 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
         inv = {**inv, "_memory": note}
     agent = Agent(scope, target, budget, exploit=exploit)
     run_agent(agent, inv)
+    if revalidate:
+        from .revalidate import revalidate as _reval
+        st = _reval(agent.findings, scope)
+        events.emit("tool", name="revalidate",
+                    detail=f"{st['reproduced']} reproduced, {st['downgraded']} downgraded")
     from dataclasses import asdict as _asdict
     memory.remember(target, [_asdict(f) for f in agent.findings], inv,
                     foothold=agent.channel.kind if agent.channel else "")
