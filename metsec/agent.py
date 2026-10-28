@@ -36,10 +36,11 @@ class Finding:
     title: str
     severity: str = "info"       # info | low | medium | high | critical
     status: str = "potential"    # potential | verified
-    affected: str = ""
+    affected: str = ""           # WHERE the flaw is (endpoint/param/file:line)
     evidence: str = ""
     remediation: str = ""
     refs: list = field(default_factory=list)
+    exploitation: str = ""       # HOW it is exploited (technique + steps)
 
 
 class Agent:
@@ -112,9 +113,9 @@ class Agent:
     def record_finding(self, title: str, severity: str = "info",
                        status: str = "potential", affected: str = "",
                        evidence: str = "", remediation: str = "",
-                       refs: list | None = None) -> dict:
-        self.findings.append(Finding(title, severity, status, affected,
-                                     evidence, remediation, refs or []))
+                       refs: list | None = None, exploitation: str = "") -> dict:
+        self.findings.append(Finding(title, severity, status, affected, evidence,
+                                     remediation, refs or [], exploitation))
         events.emit("finding", severity=severity, status=status, title=title[:120])
         return {"recorded": True, "count": len(self.findings)}
 
@@ -212,7 +213,10 @@ TOOLS = [
             "title": {"type": "string"},
             "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
             "status": {"type": "string", "enum": ["potential", "verified"]},
-            "affected": {"type": "string"}, "evidence": {"type": "string"},
+            "affected": {"type": "string", "description": "WHERE: endpoint/param/file:line"},
+            "evidence": {"type": "string"},
+            "exploitation": {"type": "string",
+                             "description": "HOW it is exploited: the technique and concrete steps"},
             "remediation": {"type": "string"},
             "refs": {"type": "array", "items": {"type": "string"}}},
             "required": ["title", "severity"]}}},
@@ -254,7 +258,10 @@ SYSTEM = (
     "to confirm conditions. Record a finding ONLY when backed by concrete evidence — a "
     "version match, a tool result, an exposed path, a reflected payload, or a missing "
     "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
-    "not batch recording for the end. Never invent vulnerabilities. Stop when done."
+    "not batch recording for the end. For every finding fill `affected` (WHERE: the exact "
+    "endpoint/param/file:line), `exploitation` (HOW it is exploited: the technique and the "
+    "concrete steps/payload you used), `evidence`, and `remediation` (the fix). Never invent "
+    "vulnerabilities. Stop when done."
 )
 DETECTION_NOTE = (" Prefer detection over exploitation. Mark a finding 'verified' only when a "
                   "probe confirmed it, otherwise 'potential'.")

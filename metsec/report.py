@@ -49,11 +49,13 @@ def _markdown(findings: list, meta: dict) -> str:
     for f in findings:
         out.append(f"## [{f.severity.upper()} · {f.status}] {f.title}")
         if f.affected:
-            out.append(f"- **Affected:** {f.affected}")
+            out.append(f"- **Where:** {f.affected}")
+        if getattr(f, "exploitation", ""):
+            out.append(f"- **How it's exploited:** {f.exploitation}")
         if f.evidence:
             out.append(f"- **Evidence:** {f.evidence}")
         if f.remediation:
-            out.append(f"- **Remediation:** {f.remediation}")
+            out.append(f"- **Fix:** {f.remediation}")
         if f.refs:
             out.append(f"- **References:** {', '.join(str(r) for r in f.refs)}")
         out.append("")

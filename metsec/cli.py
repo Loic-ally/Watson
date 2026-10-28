@@ -214,7 +214,9 @@ def assess_cmd(args: list[str]) -> int:
     for f in findings:
         print(f"\n[{f.severity.upper()} · {f.status}] {f.title}")
         if f.affected:
-            print(f"  affected: {f.affected}")
+            print(f"  where: {f.affected}")
+        if getattr(f, "exploitation", ""):
+            print(f"  how:   {f.exploitation[:160]}")
         if f.evidence:
             print(f"  evidence: {f.evidence[:160]}")
         if f.remediation:
