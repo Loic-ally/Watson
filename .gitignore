@@ -10,3 +10,4 @@ testbed/vulnapp.db
 .DS_Store
 .vscode/
 metsec-report-*
+template.html
