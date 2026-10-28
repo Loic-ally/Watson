@@ -7,3 +7,6 @@ __pycache__/
 .metsec_cache/
 ROADMAP.md
 testbed/vulnapp.db
+.DS_Store
+.vscode/
+metsec-report-*
