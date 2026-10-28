@@ -1,35 +1,39 @@
-"""Audit log — a persistent JSONL record of every tool call (requests, commands),
-for engagement traceability. Written to its own file per run.
+"""Audit log — a persistent JSONL record of every tool call (requests, commands).
+
+Path is per-context (ContextVar) so parallel runs each write their own file, while
+single runs keep one file.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import threading
 import time
 from pathlib import Path
 
 _lock = threading.Lock()
-_path: Path | None = None
+_path: contextvars.ContextVar = contextvars.ContextVar("metsec_audit", default=None)
 
 
 def start(path: str | Path) -> None:
-    global _path
-    _path = Path(path)
-    _path.parent.mkdir(parents=True, exist_ok=True)
-    _path.write_text("")
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("")
+    _path.set(str(p))
 
 
 def log(etype: str, **data) -> None:
-    if _path is None:
+    pth = _path.get()
+    if pth is None:
         return
     rec = {"ts": round(time.time(), 3), "type": etype, **data}
     with _lock:
-        with open(_path, "a") as f:
+        with open(pth, "a") as f:
             f.write(json.dumps(rec, default=str) + "\n")
 
 
 def path() -> str | None:
-    return str(_path) if _path else None
+    return _path.get()
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.audit

@@ -18,12 +18,19 @@ def targets_from_scope(scope) -> list[str]:
 
 def parallel_assess(targets: list[str], scope, active: bool = True, budget: int = 30,
                     exploit: bool = False, workers: int = 3) -> dict:
-    """Assess each target with its own agent, in parallel. → {target: Agent | Exception}."""
+    """Assess each target with its own agent, in parallel. → {target: Agent | Exception}.
+
+    Each run gets an isolated event stream + audit file (per-thread context)."""
+    from . import audit, events
     from .agent import assess
 
     def one(t):
         try:
-            return t, assess(t, scope, active=active, budget=budget, exploit=exploit)
+            events.new_stream()          # isolated feed, not interleaved with others
+            agent = assess(t, scope, active=active, budget=budget, exploit=exploit)
+            agent.run_events = events.since(0)   # this run's own feed
+            agent.run_audit = audit.path()       # this run's own audit file
+            return t, agent
         except Exception as e:  # noqa: BLE001 — isolate per-target failures
             return t, e
 
