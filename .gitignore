@@ -11,3 +11,9 @@ testbed/vulnapp.db
 .vscode/
 metsec-report-*
 template.html
+
+# Rust/TS web UI
+backend/target/
+frontend/node_modules/
+frontend/dist/
+.gstack/
