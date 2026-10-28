@@ -71,10 +71,12 @@ metsec pdf <report-dir>                                      # Spark-crafted PDF
 metsec web                                                  # full web app (login + voice chat)
 ```
 
-**More:** `--revalidate` replays verified findings to cut false positives · `--pdf` has Spark
-fill `template.html` and renders it to PDF via Chromium · the agent keeps **per-target memory**
-across runs, does **internal recon from a foothold** (`pivot_scan`) for lateral movement, and
-**scan-all** runs one sub-agent per target in parallel. External tools route through **Exegol**;
+**More:** `--revalidate` **replays the exact proving request** of each verified finding to cut
+false positives · `--pdf` has Spark fill `template.html` and renders it to PDF via Chromium · the
+agent keeps **per-target memory** across runs, does **internal recon from a foothold**
+(`pivot_scan`) and opens a **SOCKS tunnel through the foothold** (`open_tunnel`) so probes reach
+in-scope internal hosts — real lateral movement · **scan-all** runs one sub-agent per target in
+parallel, each with an **isolated event feed + audit log**. External tools route through **Exegol**;
 the web **chat** takes **voice** (Muse Voice Transcribe) and can read replies aloud (browser TTS).
 
 ## Web app
