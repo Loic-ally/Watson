@@ -65,6 +65,7 @@ class Agent:
         self.findings: list[Finding] = []
         self.hypotheses: list[Hypothesis] = []
         self.channel = None  # exec foothold once established
+        self.proxies = None  # SOCKS tunnel through the foothold, once opened
         self.done = False    # the agent declares the assessment complete
         self._calls: dict = {}  # repeat guard
 
@@ -115,8 +116,8 @@ class Agent:
         data = {param: value} if payloaded and method != "GET" else None
         headers = {**UA, "Cookie": cookie} if cookie else UA
         try:
-            r = self.session.request(method, url, params=params, data=data,
-                                     headers=headers, timeout=15, allow_redirects=False)
+            r = self.session.request(method, url, params=params, data=data, headers=headers,
+                                     timeout=15, allow_redirects=False, proxies=self.proxies)
         except requests.RequestException as e:
             return {"error": str(e)[:120]}
         body = r.text[:2000]
@@ -199,6 +200,19 @@ class Agent:
                 "suid_sample": "\n".join(profile.get("suid", "").splitlines()[:15]),
                 "privesc_candidates": candidates(profile)[:12]}
 
+    def open_tunnel(self, host: str = "", port: int = 1080) -> dict:
+        """Open a SOCKS tunnel through the foothold; http_probe then routes through it."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from urllib.parse import urlparse
+        from .pivot import open_socks
+        h = host or urlparse(self.target).hostname or "127.0.0.1"
+        self.proxies = open_socks(self.channel, h, port)
+        return {"tunnel": self.proxies,
+                "note": "http_probe now routes through the foothold — probe IN-SCOPE internal hosts"}
+
     def pivot_scan(self) -> dict:
         """Map the internal network from the foothold (interfaces, neighbors, services)."""
         if not self.exploit:
@@ -278,7 +292,7 @@ class Agent:
                   "loot": self.loot, "hypothesize": self.hypothesize,
                   "browse": self.browse, "browser_action": self.browser_action,
                   "upload_shell": self.upload_shell, "make_payload": self.make_payload,
-                  "pivot_scan": self.pivot_scan}.get(name)
+                  "pivot_scan": self.pivot_scan, "open_tunnel": self.open_tunnel}.get(name)
             if not fn:
                 result = {"error": f"unknown tool {name}"}
             else:
@@ -359,6 +373,14 @@ TOOLS = [
                        "internal hosts, then reach them with run_command (curl/nc through the "
                        "foothold) for lateral movement.",
         "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "open_tunnel",
+        "description": "Open a SOCKS tunnel through the foothold. Afterwards http_probe routes "
+                       "through the compromised host, so you can probe/exploit IN-SCOPE internal "
+                       "web hosts the foothold can reach. Requires a foothold.",
+        "parameters": {"type": "object", "properties": {
+            "host": {"type": "string", "description": "foothold host reachable from here (default: target)"},
+            "port": {"type": "integer"}}}}},
     {"type": "function", "function": {
         "name": "browse",
         "description": "Load a URL in a real headless Chromium and SEE it: returns a vision "
@@ -462,7 +484,8 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "root with `id` (uid=0). Reason beyond the candidates — kernel/cron/writable-path "
                 "escalation won't always be listed. Keep going until you are root or out of leads. "
                 "Once you have a foothold, call pivot_scan to map the internal network and reach "
-                "other IN-SCOPE internal hosts via run_command (curl/nc through the foothold). "
+                "other IN-SCOPE internal hosts via run_command (curl/nc through the foothold), or "
+                "open_tunnel to route http_probe through the foothold and attack internal web hosts. "
                 "After the foothold, and again once root, call loot to capture credentials, keys, "
                 "and proof files (root.txt/user.txt) and record notable captures as findings.")
 
@@ -627,6 +650,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert "no foothold" in exp.privesc_scan()["error"]
     assert "requires exploitation" in dev.pivot_scan()["error"]
     assert "no foothold" in exp.pivot_scan()["error"]
+    assert "requires exploitation" in dev.open_tunnel()["error"]
+    assert "no foothold" in exp.open_tunnel()["error"]
     assert "requires exploitation" in dev.loot()["error"]
     assert "no foothold" in exp.loot()["error"]
 

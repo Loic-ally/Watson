@@ -12,6 +12,7 @@ dependencies = [
     "fastembed>=0.4",
     "ddgs>=6.0",
     "flask>=3.0",
+    "pysocks>=1.7",
 ]
 
 [project.scripts]
