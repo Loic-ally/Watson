@@ -197,6 +197,15 @@ class Agent:
                 "suid_sample": "\n".join(profile.get("suid", "").splitlines()[:15]),
                 "privesc_candidates": candidates(profile)[:12]}
 
+    def pivot_scan(self) -> dict:
+        """Map the internal network from the foothold (interfaces, neighbors, services)."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from .privesc import pivot
+        return {k: (v or "")[:600] for k, v in pivot(self.channel.run).items()}
+
     def loot(self) -> dict:
         """Capture credentials, keys, and proof files through the foothold."""
         if not self.exploit:
@@ -266,7 +275,8 @@ class Agent:
                   "run_command": self.run_command, "privesc_scan": self.privesc_scan,
                   "loot": self.loot, "hypothesize": self.hypothesize,
                   "browse": self.browse, "browser_action": self.browser_action,
-                  "upload_shell": self.upload_shell, "make_payload": self.make_payload}.get(name)
+                  "upload_shell": self.upload_shell, "make_payload": self.make_payload,
+                  "pivot_scan": self.pivot_scan}.get(name)
             if not fn:
                 result = {"error": f"unknown tool {name}"}
             else:
@@ -335,6 +345,13 @@ TOOLS = [
         "description": "Enumerate the compromised host (sudo rights, SUID, capabilities, cron, "
                        "secrets) and return GTFOBins-matched privilege-escalation candidates. "
                        "Then confirm a candidate with run_command and check for uid=0.",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "pivot_scan",
+        "description": "Map the internal network from the foothold (interfaces, routes, ARP "
+                       "neighbors, /etc/hosts, listening services). Use it to find in-scope "
+                       "internal hosts, then reach them with run_command (curl/nc through the "
+                       "foothold) for lateral movement.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
         "name": "browse",
@@ -436,6 +453,8 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "matched escalation candidates, pick one, run it with run_command, and confirm "
                 "root with `id` (uid=0). Reason beyond the candidates — kernel/cron/writable-path "
                 "escalation won't always be listed. Keep going until you are root or out of leads. "
+                "Once you have a foothold, call pivot_scan to map the internal network and reach "
+                "other IN-SCOPE internal hosts via run_command (curl/nc through the foothold). "
                 "After the foothold, and again once root, call loot to capture credentials, keys, "
                 "and proof files (root.txt/user.txt) and record notable captures as findings.")
 
@@ -598,6 +617,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert "no foothold" in exp.run_command("id")["error"]
     assert "requires exploitation" in dev.privesc_scan()["error"]
     assert "no foothold" in exp.privesc_scan()["error"]
+    assert "requires exploitation" in dev.pivot_scan()["error"]
+    assert "no foothold" in exp.pivot_scan()["error"]
     assert "requires exploitation" in dev.loot()["error"]
     assert "no foothold" in exp.loot()["error"]
 
