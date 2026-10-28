@@ -326,6 +326,43 @@ def _scan_web(a: list[str], port: int = 8787) -> int:
     return 0
 
 
+def scan_all_cmd(args: list[str]) -> int:
+    """Parallel assessment of every target in the scope (one agent each)."""
+    import time
+
+    from .parallel import merge_findings, parallel_assess, targets_from_scope
+    from .report import dedup_rank, narrative, write_reports
+
+    if "--scope" not in args:
+        print("usage: metsec scan-all --scope <file> [--exploit] [--budget N] [--out dir]")
+        return 2
+    try:
+        s = Scope.load(args[args.index("--scope") + 1])
+    except (OutOfScope, FileNotFoundError) as e:
+        print(f"refused: {e}")
+        return 1
+    targets = targets_from_scope(s)
+    if not targets:
+        print("no concrete targets in scope (add domains/ips)")
+        return 1
+    exploit = "--exploit" in args
+    budget = int(args[args.index("--budget") + 1]) if "--budget" in args else 30
+    if exploit:
+        print("⚠️  exploitation ENABLED — only systems you own/are authorized to break.")
+    print(f"parallel assess of {len(targets)} target(s): {', '.join(targets)}\n")
+    results = parallel_assess(targets, s, exploit=exploit, budget=budget)
+    for t, r in results.items():
+        print(f"  {t}: {'ERROR ' + str(r) if isinstance(r, Exception) else str(len(r.findings)) + ' finding(s)'}")
+    findings = dedup_rank(merge_findings(results))
+    out_dir = args[args.index("--out") + 1] if "--out" in args \
+        else f"metsec-report-{time.strftime('%Y%m%d-%H%M%S')}"
+    meta = {"target": ", ".join(targets), "mode": s.mode, "exploit": exploit,
+            "authorized_by": s.authorized_by, "date": time.strftime("%Y-%m-%d %H:%M")}
+    j, m, h = write_reports(findings, meta, out_dir, narrative=narrative(findings, []))
+    print(f"\n{len(findings)} finding(s) total\nwrote {j}\n      {m}\n      {h}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     usage = ("usage: metsec {smoke | scope <file> | rag build [--nvd-keyword K] | "
@@ -355,6 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         return assess_cmd(rest)
     if cmd == "scan":
         return scan_cmd(rest)
+    if cmd == "scan-all":
+        return scan_all_cmd(rest)
     if cmd == "browse":
         return browse_cmd(rest)
     if cmd == "web":
