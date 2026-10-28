@@ -237,6 +237,10 @@ def assess_cmd(args: list[str]) -> int:
         j, m, h = write_reports(findings, meta, out_dir, hypotheses=hyps,
                                 narrative=narrative(findings, hyps))
         print(f"\nwrote {j}\n      {m}\n      {h}")
+        if "--pdf" in args:
+            from .report import make_pdf
+            if (pdf := make_pdf(out_dir)):
+                print(f"      {pdf}")
     return 0
 
 
@@ -356,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
         from .webapp import serve
         serve(int(rest[rest.index("--port") + 1]) if "--port" in rest else 8787)
         return 0
+    if cmd == "pdf" and rest:
+        from .report import make_pdf
+        out = make_pdf(rest[0])
+        print(f"wrote {out}" if out else "no findings.json in that directory")
+        return 0 if out else 1
     print(usage)
     return 2
 

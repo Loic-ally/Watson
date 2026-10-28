@@ -7,6 +7,7 @@ verified-before-potential.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from pathlib import Path
 
@@ -163,6 +164,88 @@ def write_reports(findings: list, meta: dict, out_dir: str, hypotheses: list | N
     mpath.write_text(_markdown(ranked, meta, hypotheses or []))
     hpath.write_text(_html(ranked, meta, hypotheses or [], narrative))
     return jpath, mpath, hpath
+
+
+def _template_html() -> str | None:
+    for p in (Path("template.html"), Path(__file__).resolve().parent.parent / "template.html"):
+        if p.exists():
+            return p.read_text()
+    return None
+
+
+def _fallback_html(data: dict) -> str:
+    from .agent import Finding, Hypothesis
+
+    fs = [Finding(title=f.get("title", ""), severity=f.get("severity", "info"),
+                  status=f.get("status", "potential"), affected=f.get("affected", ""),
+                  evidence=f.get("evidence", ""), remediation=f.get("remediation", ""),
+                  refs=f.get("refs", []), exploitation=f.get("exploitation", ""))
+          for f in data.get("findings", [])]
+    hs = [Hypothesis(**{k: h.get(k) for k in ("statement", "based_on", "test", "status")})
+          for h in data.get("hypotheses", [])]
+    meta = data.get("meta", {})
+    return _html(fs, meta, hs, meta.get("narrative", ""))
+
+
+def craft_template_html(data: dict) -> str:
+    """Spark Contributor fills template.html with the findings; falls back to the built-in report."""
+    from . import config
+
+    tpl = _template_html()
+    if tpl:
+        meta, findings = data.get("meta", {}), data.get("findings", [])
+        prompt = (
+            "You produce a penetration-test report by FILLING an HTML template. Replace EVERY "
+            "[ ... ] placeholder with real content from the data. Rules:\n"
+            "- Map severity to priority: critical/high → HIGH PRIORITY (var(--high)); medium → "
+            "MEDIUM PRIORITY (var(--medium)); low → LOW PRIORITY (var(--low)); info → GENERAL "
+            "IMPROVEMENT (var(--general)). Set the 4 count cards and the OVERVIEW table (one row "
+            "per finding).\n"
+            "- Create ONE finding slide per finding by duplicating the finding <section> pattern "
+            "(slides 4–7): keep the EXACT css classes and --x/--y/--w/--h coords; change only the "
+            "text, the priority label+color, 'FINDING N / TOTAL', and the page number. Description "
+            "= what/why (from title+evidence+how-exploited); Action Required = the fix.\n"
+            "- NEXT STEPS = top remediation priorities. Title/scope/date/auth from meta.\n"
+            "Output ONLY the complete HTML document.\n\n"
+            f"=== TEMPLATE ===\n{tpl}\n\n=== DATA ===\n"
+            + json.dumps({"meta": meta, "findings": findings[:14]}, default=str)[:7000])
+        try:
+            out = config.chat(prompt, model=config.FAST)
+            m = re.search(r"<!doctype html.*</html>", out, re.DOTALL | re.IGNORECASE) \
+                or re.search(r"<html.*</html>", out, re.DOTALL | re.IGNORECASE)
+            html = m.group(0) if m else out
+            if "<html" in html.lower() and "slide" in html:
+                return html
+        except Exception:  # noqa: BLE001 — fall back to the built-in report
+            pass
+    return _fallback_html(data)
+
+
+def to_pdf(html: str, out_path: str) -> str:
+    """Render HTML → PDF with headless Chromium (respects the template's @page size)."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        try:
+            page = b.new_page()
+            page.set_content(html, wait_until="networkidle")
+            page.pdf(path=out_path, prefer_css_page_size=True, print_background=True)
+        finally:
+            b.close()
+    return out_path
+
+
+def make_pdf(report_dir: str) -> str | None:
+    """Craft the template report for a report dir's findings.json and render it to report.pdf."""
+    d = Path(report_dir)
+    f = d / "findings.json"
+    if not f.exists():
+        return None
+    data = json.loads(f.read_text())
+    html = craft_template_html(data)
+    (d / "report_filled.html").write_text(html)
+    return to_pdf(html, str(d / "report.pdf"))
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
