@@ -188,9 +188,41 @@ def _parse_deps(root: str) -> list[dict]:
     return deps
 
 
+def _sem_sev(s: str) -> str:
+    return {"ERROR": "high", "WARNING": "medium", "INFO": "low"}.get((s or "").upper(), "info")
+
+
+def _parse_semgrep(data: dict) -> list[dict]:
+    out = []
+    for r in data.get("results", []):
+        extra = r.get("extra", {})
+        out.append({"file": r.get("path", ""), "line": r.get("start", {}).get("line", 0),
+                    "rule": "semgrep:" + (r.get("check_id", "") or "rule").split(".")[-1][:40],
+                    "severity": _sem_sev(extra.get("severity")),
+                    "message": (extra.get("message", "") or "")[:160],
+                    "snippet": (extra.get("lines", "") or "").strip()[:160]})
+    return out
+
+
+def _scan_semgrep(root: str) -> list[dict]:
+    """Multi-language SAST via Semgrep (host or Exegol). ponytail: AST covers Python
+    precisely; Semgrep adds JS/PHP/Java/Go/… coverage."""
+    from .tools import have, run_with_path
+
+    if not have("semgrep"):
+        return []
+    _, out, _ = run_with_path(
+        ["semgrep", "--config", "auto", "--json", "--quiet", "--timeout", "60", root],
+        root, timeout=300)
+    try:
+        return _parse_semgrep(json.loads(out)) if out else []
+    except ValueError:
+        return []
+
+
 def analyze(code_path: str) -> dict:
-    return {"mode": "static", "code_path": code_path,
-            "deps": _parse_deps(code_path), "code_findings": _scan_source(code_path)}
+    return {"mode": "static", "code_path": code_path, "deps": _parse_deps(code_path),
+            "code_findings": _scan_source(code_path) + _scan_semgrep(code_path)}
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.static (offline)
@@ -221,4 +253,10 @@ if __name__ == "__main__":  # self-check: python -m metsec.static (offline)
         assert sum(f["rule"] == "sql-injection" for f in fs) == 1, fs
         names = {dep["name"] for dep in out["deps"]}
         assert names == {"requests", "jinja2"} and out["deps"][0]["version"] == "2.19.1", out["deps"]
+
+    sg = {"results": [{"path": "a.js", "check_id": "javascript.lang.security.audit.xss",
+          "start": {"line": 12}, "extra": {"severity": "ERROR", "message": "XSS sink",
+                                            "lines": "res.send(x)"}}]}
+    ps = _parse_semgrep(sg)
+    assert ps[0]["rule"] == "semgrep:xss" and ps[0]["severity"] == "high" and ps[0]["line"] == 12
     print("static self-check ok")

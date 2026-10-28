@@ -62,6 +62,31 @@ def run(argv: list[str], timeout: int = 300) -> tuple[int, str, str]:
         return 127, "", "not found"
 
 
+def run_with_path(argv: list[str], host_path: str, timeout: int = 300) -> tuple[int, str, str]:
+    """Run a file-based tool. If it runs in Exegol, copy host_path in first (the
+    container can't see host files), substitute it in argv, run, then clean up."""
+    if shutil.which(argv[0]):
+        return run(argv, timeout)
+    c = exegol_container()
+    if not c:
+        return 127, "", "not found (no host tool, no exegol container)"
+    import uuid
+    dest = f"/tmp/metsec_{uuid.uuid4().hex[:8]}"
+    try:
+        cp = subprocess.run(["docker", "cp", host_path, f"{c}:{dest}"],
+                            capture_output=True, text=True, timeout=120)
+        if cp.returncode != 0:
+            return cp.returncode, "", cp.stderr
+        cargv = [dest if a == host_path else a for a in argv]
+        cmd = ["docker", "exec", c, "sh", "-lc", " ".join(shlex.quote(a) for a in cargv)]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, "", str(e)[:200]
+    finally:
+        subprocess.run(["docker", "exec", c, "rm", "-rf", dest], capture_output=True, timeout=30)
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.tools
     assert exegol_container() is None or isinstance(exegol_container(), str)
     code, out, _ = run(["echo", "metsec_tools_ok"])   # host path (echo always present)
