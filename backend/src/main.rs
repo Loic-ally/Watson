@@ -10,12 +10,14 @@
 //!      METSEC_PORT (default 8787).
 
 mod auth;
+mod bridge;
+mod scan;
 mod state;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use axum::{routing::post, Router};
+use axum::{routing::{get, post}, Router};
 use tokio::sync::broadcast;
 
 use state::{root, AppState, RunState};
@@ -32,6 +34,9 @@ async fn main() {
     let app = Router::new()
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))
+        .route("/api/chat", post(scan::api_chat))
+        .route("/api/status", get(scan::api_status))
+        .route("/stream", get(scan::stream))
         .fallback_service(tower_http::services::ServeDir::new(root().join("frontend/dist")))
         .with_state(state);
 
