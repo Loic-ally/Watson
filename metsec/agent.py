@@ -14,7 +14,7 @@ from urllib.parse import unquote
 
 import requests
 
-from . import events
+from . import audit, events
 from .scope import OutOfScope
 
 UA = {"User-Agent": "Mozilla/5.0 (MetSec agent)"}
@@ -232,22 +232,26 @@ class Agent:
         key = (name, _json.dumps(args, sort_keys=True, default=str)[:200])
         self._calls[key] = self._calls.get(key, 0) + 1
         if self._calls[key] > 4 and name not in ("finish", "record_finding", "hypothesize"):
-            return {"note": "identical call repeated — test something new, or call finish if done"}
-        fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
-              "finish": self.finish,
-              "record_finding": self.record_finding,
-              "establish_foothold": self.establish_foothold,
-              "run_command": self.run_command, "privesc_scan": self.privesc_scan,
-              "loot": self.loot, "hypothesize": self.hypothesize,
-              "browse": self.browse, "browser_action": self.browser_action}.get(name)
-        if not fn:
-            return {"error": f"unknown tool {name}"}
-        try:
-            return fn(**args)
-        except OutOfScope as e:
-            return {"error": f"out of scope: {e}"}
-        except TypeError as e:
-            return {"error": f"bad args: {e}"}
+            result = {"note": "identical call repeated — test something new, or call finish if done"}
+        else:
+            fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
+                  "finish": self.finish,
+                  "record_finding": self.record_finding,
+                  "establish_foothold": self.establish_foothold,
+                  "run_command": self.run_command, "privesc_scan": self.privesc_scan,
+                  "loot": self.loot, "hypothesize": self.hypothesize,
+                  "browse": self.browse, "browser_action": self.browser_action}.get(name)
+            if not fn:
+                result = {"error": f"unknown tool {name}"}
+            else:
+                try:
+                    result = fn(**args)
+                except OutOfScope as e:
+                    result = {"error": f"out of scope: {e}"}
+                except TypeError as e:
+                    result = {"error": f"bad args: {e}"}
+        audit.log("call", tool=name, args=args, result=_json.dumps(result, default=str)[:300])
+        return result
 
 
 TOOLS = [
@@ -463,9 +467,13 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 def assess(target: str | None, scope, active: bool = False, budget: int = 16,
            exploit: bool = False, fresh: bool = False) -> "Agent":
     """Full assessment: gather evidence → agent loop. Returns the Agent (.findings/.hypotheses)."""
+    import time
+
     from . import cache
 
     target = target or scope.code_path
+    audit.start(f".metsec_cache/audit/metsec-{int(time.time())}.jsonl")
+    audit.log("start", target=target, mode=scope.mode, exploit=exploit)
     ckey = (target, scope.mode, active)
     inv = None if fresh else cache.get(ckey)
     if inv is None:

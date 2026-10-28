@@ -43,6 +43,7 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str
         f"- **Exploitation:** {'enabled' if meta.get('exploit') else 'disabled'}",
         f"- **Authorized by:** {meta.get('authorized_by', '')}",
         f"- **Date:** {meta.get('date', '')}",
+        *([f"- **Audit log:** {meta['audit']}"] if meta.get("audit") else []),
         f"- **Findings:** {len(findings)} ({badge})" if findings else "- **Findings:** 0",
         "", "---", "",
     ]

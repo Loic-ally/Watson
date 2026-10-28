@@ -230,8 +230,9 @@ def assess_cmd(args: list[str]) -> int:
         for h in hyps:
             print(f"  [{h.status}] {h.statement[:120]}")
     if out_dir:
+        from . import audit
         meta = {"target": target or s.code_path, "mode": s.mode, "exploit": exploit,
-                "authorized_by": s.authorized_by,
+                "authorized_by": s.authorized_by, "audit": audit.path(),
                 "date": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         j, m = write_reports(findings, meta, out_dir, hypotheses=hyps)
         print(f"\nwrote {j}  and  {m}")
