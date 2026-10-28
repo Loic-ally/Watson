@@ -64,10 +64,18 @@ metsec rag search "sudo find privesc" -k 3     # query the index
 metsec research lodash 4.17.4 --ecosystem npm  # live vuln research for a tech+version
 metsec recon <url> --scope scope.yaml --active --research   # recon + find vulns
 metsec browse <url> --scope scope.yaml         # vision browser recon (screenshot + analysis)
-metsec assess <url> --scope scope.yaml [--active] [--exploit] [--out dir] [--fresh]
+metsec assess <url> --scope scope.yaml [--active] [--exploit] [--out dir] [--revalidate] [--pdf]
 metsec scan --web <url> --scope scope.yaml --exploit        # one-shot + live dashboard
-metsec web                                                  # full web app (login + chat)
+metsec scan-all --scope scope.yaml --exploit                # parallel over all scope targets
+metsec pdf <report-dir>                                      # Spark-crafted PDF (template.html)
+metsec web                                                  # full web app (login + voice chat)
 ```
+
+**More:** `--revalidate` replays verified findings to cut false positives · `--pdf` has Spark
+fill `template.html` and renders it to PDF via Chromium · the agent keeps **per-target memory**
+across runs, does **internal recon from a foothold** (`pivot_scan`) for lateral movement, and
+**scan-all** runs one sub-agent per target in parallel. External tools route through **Exegol**;
+the web **chat** takes **voice** (Muse Voice Transcribe) and can read replies aloud (browser TTS).
 
 ## Web app
 
