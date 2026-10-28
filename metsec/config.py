@@ -15,9 +15,12 @@ load_dotenv()
 
 BASE_URL = "https://api.meta.ai/v1"
 
-# Model routing — see ROADMAP.md "Model routing".
-BRAIN = "muse-wonder-1.0"   # planning + report synthesis (long-horizon, high effort)
-FAST = "muse-spark-1.3"     # triage, classification, tool loops (high-volume, cheap)
+# Model routing. Wonder dropped per user; Spark 1.3 Contributor runs both roles
+# (supports tool calling + vision). Contributor = cheaper, but inputs/outputs are
+# used to train Meta models — keep that in mind for sensitive engagements.
+# Note: SAM 3.1 is a segmentation model (boxes/masks) and cannot run the agent.
+BRAIN = "muse-spark-1.3-contributor"   # planning, reasoning, vision, tool calling
+FAST = "muse-spark-1.3-contributor"    # triage, classification, tool loops
 
 
 @lru_cache(maxsize=1)
