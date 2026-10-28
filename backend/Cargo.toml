@@ -1,0 +1,15 @@
+[package]
+name = "metsec-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7.9"
+tokio = { version = "1.42.0", features = ["full"] }
+tower-http = { version = "0.6.2", features = ["fs"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.135"
+async-stream = "0.3.6"
+tokio-stream = "0.1.17"
+futures = "0.3.31"
+uuid = { version = "1.11.0", features = ["v4"] }
