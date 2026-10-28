@@ -334,7 +334,8 @@ let rec={on:false};
 async function mic(){
  if(rec.on){stopRec();return;}
  let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){add('sys','🎤 microphone blocked');return;}
- const ctx=new (window.AudioContext||window.webkitAudioContext)();
+ let ctx;try{ctx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});}
+ catch(e){ctx=new (window.AudioContext||window.webkitAudioContext)();}
  const src=ctx.createMediaStreamSource(stream),node=ctx.createScriptProcessor(4096,1,1),buf=[];
  node.onaudioprocess=e=>buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
  src.connect(node);node.connect(ctx.destination);
@@ -343,15 +344,17 @@ async function mic(){
 function stopRec(){const r=rec;rec={on:false};
  r.node.disconnect();r.src.disconnect();r.stream.getTracks().forEach(t=>t.stop());
  const m=document.getElementById('mic');m.textContent='🎤';m.style.color='var(--txt)';
- const wav=encodeWav(r.buf,r.sr);r.ctx.close();
- const fd=new FormData();fd.append('audio',wav,'rec.wav');fd.append('sample_rate',r.sr);
+ let len=r.buf.reduce((a,c)=>a+c.length,0),pcm=new Float32Array(len),o=0;
+ for(const c of r.buf){pcm.set(c,o);o+=c.length;}
+ if(r.sr!==16000)pcm=resample(pcm,r.sr,16000);        // Muse ASR only accepts 16 kHz
+ const wav=encodeWav(pcm,16000);r.ctx.close();
+ const fd=new FormData();fd.append('audio',wav,'rec.wav');fd.append('sample_rate','16000');
  add('sys','… transcribing');
  fetch('/api/transcribe',{method:'POST',body:fd}).then(x=>x.json()).then(j=>{
   if(j.text){inp.value=j.text;send();}else add('sys','⚠️ '+(j.error||'no transcript'));});}
-function encodeWav(chunks,sr){
- let len=chunks.reduce((a,c)=>a+c.length,0);const pcm=new Float32Array(len);let o=0;
- for(const c of chunks){pcm.set(c,o);o+=c.length;}
- const b=new ArrayBuffer(44+len*2),v=new DataView(b);
+function resample(pcm,from,to){if(from===to)return pcm;const ratio=from/to,n=Math.round(pcm.length/ratio),out=new Float32Array(n);
+ for(let i=0;i<n;i++){const idx=i*ratio,i0=Math.floor(idx),i1=Math.min(i0+1,pcm.length-1),f=idx-i0;out[i]=pcm[i0]*(1-f)+pcm[i1]*f;}return out;}
+function encodeWav(pcm,sr){const len=pcm.length,b=new ArrayBuffer(44+len*2),v=new DataView(b);
  const ws=(off,s)=>{for(let i=0;i<s.length;i++)v.setUint8(off+i,s.charCodeAt(i));};
  ws(0,'RIFF');v.setUint32(4,36+len*2,true);ws(8,'WAVE');ws(12,'fmt ');
  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);

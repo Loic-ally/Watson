@@ -55,5 +55,10 @@ def transcribe(audio: bytes, sample_rate: int = 16000, encoding: str = "WAV",
                       headers={"Authorization": f"Bearer {os.environ['META_API_KEY']}"},
                       files={"audio": ("audio.wav", audio, "audio/wav")},
                       data={"request": json.dumps(req)}, timeout=60)
-    r.raise_for_status()
+    if r.status_code != 200:
+        try:
+            msg = r.json().get("error", {}).get("message", "")
+        except ValueError:
+            msg = r.text[:160]
+        raise RuntimeError(f"transcribe {r.status_code}: {msg}")   # e.g. non-16kHz WAV
     return r.json().get("transcript", "")
