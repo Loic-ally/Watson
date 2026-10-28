@@ -80,6 +80,26 @@ def segment(png: bytes, phrase: str) -> list[dict]:
     return _parse_boxes(text)
 
 
+_FILL_JS = """([x, y, text]) => {
+  let el = document.elementFromPoint(x, y);
+  if (el && !['INPUT','TEXTAREA'].includes(el.tagName))
+    el = el.closest('input,textarea') || el.querySelector('input,textarea') || el;
+  if (el && ['INPUT','TEXTAREA'].includes(el.tagName)) {
+    el.focus(); el.value = text;
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+    return true;
+  }
+  return false;
+}"""
+_CLICK_JS = """([x, y]) => {
+  let el = document.elementFromPoint(x, y);
+  if (!el) return false;
+  (el.closest('button,a,input[type=submit],[role=button]') || el).click();
+  return true;
+}"""
+
+
 def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
     """Drive the page by VISION: SAM locates each element, Playwright clicks/fills it.
 
@@ -100,12 +120,18 @@ def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
                     log.append(f"{st['find']}: not located")
                     continue
                 cx, cy = boxes[0]["center"]
-                page.mouse.click(cx, cy)
                 if st.get("fill") is not None:
-                    page.keyboard.type(str(st["fill"]))
-                    log.append(f"filled '{st['find']}' @({cx},{cy})")
+                    # snap the SAM box to the real DOM input for a reliable fill
+                    ok = page.evaluate(_FILL_JS, [cx, cy, str(st["fill"])])
+                    if not ok:
+                        page.mouse.click(cx, cy)
+                        page.keyboard.type(str(st["fill"]))
+                    log.append(f"filled '{st['find']}' @({cx},{cy})" + ("" if ok else " [coord]"))
                 else:
-                    log.append(f"clicked '{st['find']}' @({cx},{cy})")
+                    ok = page.evaluate(_CLICK_JS, [cx, cy])
+                    if not ok:
+                        page.mouse.click(cx, cy)
+                    log.append(f"clicked '{st['find']}' @({cx},{cy})" + ("" if ok else " [coord]"))
                 page.wait_for_timeout(600)
             try:  # let any navigation settle before the final capture
                 page.wait_for_load_state("networkidle", timeout=4000)
