@@ -13,6 +13,7 @@ import os
 import secrets
 import time
 from functools import wraps
+from pathlib import Path
 
 from . import events, runs
 
@@ -193,15 +194,32 @@ def create_app():
         data = runs.read_report(name)
         if not data:
             return _page("reports", "Report", "", "<div class='card'>Report not found.</div>")
+        bar = (f"<p><a href='/reports'>← all reports</a> &nbsp; "
+               f"<a class='btn' style='text-decoration:none;padding:6px 14px' "
+               f"href='/report/{name}/pdf'>⬇ PDF</a></p>")
         html_f = Path(name) / "report.html"
         if html_f.exists():
             inner = html_f.read_text().replace('"', "&quot;")
-            body = (f"<p><a href='/reports'>← all reports</a></p>"
-                    f"<iframe srcdoc=\"{inner}\" style='width:100%;height:calc(100vh - 160px);"
+            body = (bar + f"<iframe srcdoc=\"{inner}\" style='width:100%;height:calc(100vh - 180px);"
                     f"border:1px solid var(--line);border-radius:10px;background:#0b0e14'></iframe>")
         else:
-            body = "<div class='card'>" + _findings_table(data.get("findings", [])) + "</div>"
+            body = bar + "<div class='card'>" + _findings_table(data.get("findings", [])) + "</div>"
         return _page("reports", "Report", name, body)
+
+    @app.route("/report/<name>/pdf")
+    @login_required
+    def report_pdf(name):
+        from flask import abort, send_file
+        if not runs.read_report(name):   # validates name (no traversal) + existence
+            abort(404)
+        pdf = Path(name) / "report.pdf"
+        if not pdf.exists():
+            from .report import make_pdf   # craft (Spark) + render — may take ~30s
+            make_pdf(name)
+        if not pdf.exists():
+            abort(500)
+        return send_file(str(pdf.resolve()), mimetype="application/pdf",
+                         download_name=f"{name}.pdf")
 
     @app.route("/knowledge")
     @login_required
