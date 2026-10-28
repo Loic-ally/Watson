@@ -66,7 +66,20 @@ metsec recon <url> --scope scope.yaml --active --research   # recon + find vulns
 metsec browse <url> --scope scope.yaml         # vision browser recon (screenshot + analysis)
 metsec assess <url> --scope scope.yaml [--active] [--exploit] [--out dir] [--fresh]
 metsec scan --web <url> --scope scope.yaml --exploit        # one-shot + live dashboard
+metsec web                                                  # full web app (login + chat)
 ```
+
+## Web app
+
+`metsec web` serves a dark-themed control panel at **http://127.0.0.1:8787** (login
+`admin` / `METSEC_WEB_PASS`, default `metsec`):
+
+- **Chat** — tell the agent what to do in natural language (*"pentest http://127.0.0.1:5002
+  in dev mode with exploit"*); it parses the instruction, launches the scan, and **streams
+  its path live** in the conversation. Non-scan messages are answered from the latest run.
+- **Dashboard** — live kill-chain tracker (Recon → Exploit → Foothold → Privesc → ROOT).
+- **Reports** — every past assessment with CVSS + findings; open the full styled report.
+- **Knowledge** — search the CVE / technique index from the browser.
 
 ## The agent
 
