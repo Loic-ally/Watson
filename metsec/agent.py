@@ -41,6 +41,7 @@ class Finding:
     remediation: str = ""
     refs: list = field(default_factory=list)
     exploitation: str = ""       # HOW it is exploited (technique + steps)
+    probe: dict = field(default_factory=dict)   # the exact proving request, for re-validation
 
 
 @dataclass
@@ -125,9 +126,10 @@ class Agent:
     def record_finding(self, title: str, severity: str = "info",
                        status: str = "potential", affected: str = "",
                        evidence: str = "", remediation: str = "",
-                       refs: list | None = None, exploitation: str = "") -> dict:
+                       refs: list | None = None, exploitation: str = "",
+                       probe: dict | None = None) -> dict:
         self.findings.append(Finding(title, severity, status, affected, evidence,
-                                     remediation, refs or [], exploitation))
+                                     remediation, refs or [], exploitation, probe or {}))
         events.emit("finding", severity=severity, status=status, title=title[:120])
         return {"recorded": True, "count": len(self.findings)}
 
@@ -321,7 +323,11 @@ TOOLS = [
             "exploitation": {"type": "string",
                              "description": "HOW it is exploited: the technique and concrete steps"},
             "remediation": {"type": "string"},
-            "refs": {"type": "array", "items": {"type": "string"}}},
+            "refs": {"type": "array", "items": {"type": "string"}},
+            "probe": {"type": "object", "description": "for a VERIFIED finding, the exact request "
+                      "that proves it so it can be re-validated: {url, method, param, value, "
+                      "cookie, expect} where expect is a status code or a substring the response "
+                      "must contain"}},
             "required": ["title", "severity"]}}},
     {"type": "function", "function": {
         "name": "establish_foothold",
@@ -431,7 +437,9 @@ SYSTEM = (
     "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
     "not batch recording for the end. For every finding fill `affected` (WHERE: the exact "
     "endpoint/param/file:line), `exploitation` (HOW it is exploited: the technique and the "
-    "concrete steps/payload you used), `evidence`, and `remediation` (the fix). Actively "
+    "concrete steps/payload you used), `evidence`, and `remediation` (the fix). For a VERIFIED "
+    "finding, also pass `probe` = the exact request that proves it ({url, method, param, value, "
+    "cookie, expect}) so it can be re-validated. Actively "
     "connect the dots: when two observations might relate, call hypothesize to record the link "
     "and what would test it, then test it. Never invent vulnerabilities. YOU decide when the "
     "assessment is complete: call finish(summary) once you have reached the objective (e.g. "

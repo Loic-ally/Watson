@@ -46,31 +46,69 @@ def _reproduces(url: str, f, sess: requests.Session) -> bool:
         return False
 
 
+def _replay_probe(probe: dict, scope, sess: requests.Session):
+    """Re-send the exact proving request and check `expect`. None if not replayable."""
+    from .scope import OutOfScope
+
+    url = probe.get("url", "")
+    if not url:
+        return None
+    try:
+        scope.require(url)
+    except OutOfScope:
+        return None
+    method = (probe.get("method") or "GET").upper()
+    param, value, cookie = probe.get("param"), probe.get("value"), probe.get("cookie")
+    expect = str(probe.get("expect", "") or "")
+    headers = dict(UA)
+    if cookie:
+        headers["Cookie"] = cookie
+    params = {param: value} if (param and value is not None and method == "GET") else None
+    data = {param: value} if (param and value is not None and method != "GET") else None
+    try:
+        r = sess.request(method, url, params=params, data=data, headers=headers,
+                         timeout=12, allow_redirects=False)
+    except requests.RequestException:
+        return False
+    if not expect:
+        return r.status_code < 500 and r.status_code not in (404, 410)
+    return str(r.status_code) == expect if expect.isdigit() else expect in r.text
+
+
 def revalidate(findings: list, scope, session: requests.Session | None = None) -> dict:
-    """Mutates findings in place. Returns {reproduced, downgraded, skipped}."""
+    """Mutates findings in place. Returns {reproduced, downgraded, skipped, replayed}."""
     from .scope import OutOfScope
 
     sess = session or requests.Session()
-    repro = down = skipped = 0
+    repro = down = skipped = replayed = 0
     for f in findings:
         if _get(f, "status") != "verified":
             continue
-        m = _URL.search(_get(f, "affected"))
-        if not m:
+        probe = _get(f, "probe")
+        if isinstance(probe, dict) and probe.get("url"):   # full replay of the proving request
+            ok = _replay_probe(probe, scope, sess)
+            if ok is not None:
+                replayed += 1
+        else:                                              # heuristic reachability/reflection
+            m = _URL.search(_get(f, "affected"))
+            if not m:
+                skipped += 1
+                continue
+            url = m.group(0).rstrip(".,)")
+            try:
+                scope.require(url)
+            except OutOfScope:
+                skipped += 1
+                continue
+            ok = _reproduces(url, f, sess)
+        if ok is None:
             skipped += 1
-            continue
-        url = m.group(0).rstrip(".,)")
-        try:
-            scope.require(url)
-        except OutOfScope:
-            skipped += 1
-            continue
-        if _reproduces(url, f, sess):
+        elif ok:
             repro += 1
         else:
             _downgrade(f, "not reproduced")
             down += 1
-    return {"reproduced": repro, "downgraded": down, "skipped": skipped}
+    return {"reproduced": repro, "downgraded": down, "skipped": skipped, "replayed": replayed}
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.revalidate
@@ -108,10 +146,17 @@ if __name__ == "__main__":  # self-check: python -m metsec.revalidate
         {"title": "Reflected XSS", "status": "verified", "affected": f"{base}/search?q=", "evidence": ""},
         {"title": "Gone endpoint", "status": "verified", "affected": f"{base}/old", "evidence": ""},
         {"title": "Potential CVE", "status": "potential", "affected": f"{base}/.env", "evidence": ""},
+        # full-replay findings (carry the exact proving request)
+        {"title": "SQLi marker", "status": "verified", "affected": f"{base}/search", "evidence": "",
+         "probe": {"url": f"{base}/search", "param": "q", "value": "MARK42", "expect": "MARK42"}},
+        {"title": "Stale verified", "status": "verified", "affected": f"{base}/search", "evidence": "",
+         "probe": {"url": f"{base}/search", "param": "q", "value": "x", "expect": "ZZZNOPE"}},
     ]
     stats = revalidate(fs, scope)
     srv.shutdown()
-    assert stats["reproduced"] == 2 and stats["downgraded"] == 1, stats   # .env + xss repro; /old gone
+    assert stats["reproduced"] == 3 and stats["downgraded"] == 2, stats   # .env, xss, replayed-SQLi
+    assert stats["replayed"] == 2, stats                                  # the two probe-based ones
     assert fs[2]["status"] == "potential" and "not reproduced" in fs[2]["evidence"]
-    assert fs[0]["status"] == "verified" and fs[3]["status"] == "potential"  # potential untouched
+    assert fs[3]["status"] == "potential"                                 # potential untouched
+    assert fs[4]["status"] == "verified" and fs[5]["status"] == "potential"  # replay OK vs failed
     print("revalidate self-check ok")
