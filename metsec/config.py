@@ -21,6 +21,7 @@ BASE_URL = "https://api.meta.ai/v1"
 # Note: SAM 3.1 is a segmentation model (boxes/masks) and cannot run the agent.
 BRAIN = "muse-spark-1.3-contributor"   # planning, reasoning, vision, tool calling
 FAST = "muse-spark-1.3-contributor"    # triage, classification, tool loops
+SEGMENT = "sam-3.1"                     # segmentation → element coords for browser interaction
 
 
 @lru_cache(maxsize=1)

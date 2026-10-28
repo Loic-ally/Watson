@@ -8,6 +8,10 @@ Optional: needs `pip install playwright && playwright install chromium`.
 from __future__ import annotations
 
 import base64
+import re
+
+# SAM 3.1 encodes each detection as <|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..|> + a mask.
+_BOX = re.compile(r"<\|box;x1=(\d+);y1=(\d+);x2=(\d+);y2=(\d+);w=(\d+);h=(\d+)\|>")
 
 _LINKS_JS = "els => els.map(e => e.href)"
 _FORMS_JS = """els => els.map(f => ({
@@ -52,6 +56,69 @@ def vision_analyze(png: bytes, prompt: str) -> str:
     return config.chat(messages, model=config.BRAIN)
 
 
+def _parse_boxes(text: str) -> list[dict]:
+    out = []
+    for m in _BOX.finditer(text or ""):
+        x1, y1, x2, y2, w, h = map(int, m.groups())
+        out.append({"box": [x1, y1, x2, y2], "center": [(x1 + x2) // 2, (y1 + y2) // 2],
+                    "w": w, "h": h})
+    return out
+
+
+def segment(png: bytes, phrase: str) -> list[dict]:
+    """SAM 3.1: locate everything matching a noun phrase → boxes + centers."""
+    from . import config
+
+    b64 = base64.b64encode(png).decode()
+    r = config.client().responses.create(model=config.SEGMENT, input=[{"role": "user", "content": [
+        {"type": "input_text", "text": phrase},
+        {"type": "input_image", "image_url": f"data:image/png;base64,{b64}"}]}])
+    text = ""
+    for o in getattr(r, "output", []) or []:
+        for c in getattr(o, "content", []) or []:
+            text += getattr(c, "text", "") or ""
+    return _parse_boxes(text)
+
+
+def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
+    """Drive the page by VISION: SAM locates each element, Playwright clicks/fills it.
+
+    steps: [{"find": "<noun phrase>", "fill": "<text>"?}] — fill present ⇒ type into it,
+    else click. Viewport is fixed so SAM coordinates map 1:1 to clicks.
+    """
+    from playwright.sync_api import sync_playwright
+
+    log = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        try:
+            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            for st in steps:
+                boxes = segment(page.screenshot(), st["find"])
+                if not boxes:
+                    log.append(f"{st['find']}: not located")
+                    continue
+                cx, cy = boxes[0]["center"]
+                page.mouse.click(cx, cy)
+                if st.get("fill") is not None:
+                    page.keyboard.type(str(st["fill"]))
+                    log.append(f"filled '{st['find']}' @({cx},{cy})")
+                else:
+                    log.append(f"clicked '{st['find']}' @({cx},{cy})")
+                page.wait_for_timeout(600)
+            try:  # let any navigation settle before the final capture
+                page.wait_for_load_state("networkidle", timeout=4000)
+            except Exception:  # noqa: BLE001
+                pass
+            vision = vision_analyze(page.screenshot(),
+                                    "After these actions, what does the page show now "
+                                    "(errors, success, authenticated state)?")
+            return {"log": log, "url": page.url, "title": page.title(), "vision": vision[:1200]}
+        finally:
+            browser.close()
+
+
 if __name__ == "__main__":  # self-check: python -m metsec.browser (local page, no vision call)
     import threading
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -79,4 +146,11 @@ if __name__ == "__main__":  # self-check: python -m metsec.browser (local page, 
     assert any(f["inputs"] and f["inputs"][-1]["type"] == "password" for f in snap["forms"]), snap["forms"]
     assert any(l.endswith("/admin") for l in snap["links"]), snap["links"]
     srv.shutdown()
+
+    # SAM box parsing (real output shape)
+    sam = ("<0f>0<|box;x1=50;y1=98;x2=214;y2=132;w=1280;h=720|><|mask;x=0;data=35|>,"
+           "1<|box;x1=50;y1=143;x2=214;y2=177;w=1280;h=720|><|mask;x=0;data=9|>")
+    boxes = _parse_boxes(sam)
+    assert len(boxes) == 2 and boxes[0]["center"] == [132, 115], boxes
+    assert boxes[1]["box"] == [50, 143, 214, 177] and boxes[1]["center"] == [132, 160]
     print("browser self-check ok")

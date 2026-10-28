@@ -199,6 +199,21 @@ class Agent:
         return {"title": snap["title"], "vision": vision[:1500],
                 "links": snap["links"][:40], "forms": snap["forms"][:10]}
 
+    def browser_action(self, url: str, steps: list) -> dict:
+        """Drive the page by vision: SAM locates each element, Playwright clicks/fills it."""
+        if self.scope.mode == "static":
+            return {"error": "static mode: no browser"}
+        self.scope.require(url)
+        if not isinstance(steps, list) or not steps:
+            return {"error": "steps must be a non-empty list of {find, fill?}"}
+        try:
+            from .browser import interact
+            return interact(url, steps)
+        except ImportError:
+            return {"error": "browser needs: pip install playwright && playwright install chromium"}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"browser: {str(e)[:140]}"}
+
     def hypothesize(self, statement: str, based_on: list | None = None,
                     test: str = "", status: str = "untested") -> dict:
         """Record a link between observations → a possible attack path, and how to test it."""
@@ -212,7 +227,7 @@ class Agent:
               "establish_foothold": self.establish_foothold,
               "run_command": self.run_command, "privesc_scan": self.privesc_scan,
               "loot": self.loot, "hypothesize": self.hypothesize,
-              "browse": self.browse}.get(name)
+              "browse": self.browse, "browser_action": self.browser_action}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -289,6 +304,18 @@ TOOLS = [
             "question": {"type": "string", "description": "what to look for on the page"}},
             "required": ["url"]}}},
     {"type": "function", "function": {
+        "name": "browser_action",
+        "description": "Drive the page by VISION: SAM locates each element from a noun phrase and "
+                       "Playwright clicks/fills it. Use to interact with the real UI (log in, "
+                       "multi-step flows) when selectors are unknown.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string"},
+            "steps": {"type": "array", "items": {"type": "object", "properties": {
+                "find": {"type": "string", "description": "noun phrase, e.g. 'username field'"},
+                "fill": {"type": "string", "description": "text to type; omit to click"}},
+                "required": ["find"]}}},
+            "required": ["url", "steps"]}}},
+    {"type": "function", "function": {
         "name": "hypothesize",
         "description": "Record a hypothesis that LINKS findings/observations into a possible "
                        "attack path (credential reuse across services, an exposed config that "
@@ -314,7 +341,9 @@ SYSTEM = (
     "(authorization is already verified via scope). Investigate the recon inventory using "
     "the tools: look up vulnerabilities for detected tech+versions, and probe in-scope URLs "
     "to confirm conditions. For recon you can call browse(url) to load a page in a real "
-    "browser and SEE it (screenshot + vision), catching forms/features static recon misses. "
+    "browser and SEE it (screenshot + vision), catching forms/features static recon misses, "
+    "and browser_action(url, steps) to interact by vision (SAM locates elements to click/fill, "
+    "e.g. to log in through the real UI). "
     "Record a finding ONLY when backed by concrete evidence — a "
     "version match, a tool result, an exposed path, a reflected payload, or a missing "
     "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
@@ -499,5 +528,6 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
 
     stat = Agent(Scope(code_path=".", authorized_by="t", mode="static"), "x")
     assert "static mode" in stat.browse("http://127.0.0.1/")["error"]  # no browser in static
+    assert "static mode" in stat.browser_action("http://127.0.0.1/", [{"find": "x"}])["error"]
     srv.shutdown()
     print("agent self-check ok")
