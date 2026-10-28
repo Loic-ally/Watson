@@ -1,7 +1,7 @@
 """Phase 3 — the agent loop.
 
-Muse Wonder reasons over real recon + RAG evidence and calls a small DEFENSIVE
-toolset to investigate, recording only grounded findings. The model plans and
+The reasoning model (Muse Spark) reasons over real recon + RAG evidence and calls
+a small DEFENSIVE toolset to investigate, recording only grounded findings. It plans and
 correlates; the tools do the probing. Mode-gated: static blocks network,
 prod is detection-first (safe GET only), dev may send payloads.
 """
