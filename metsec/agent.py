@@ -181,6 +181,24 @@ class Agent:
         from .privesc import loot as _loot
         return _loot(self.channel.run) or {"info": "no readable secrets as current user"}
 
+    def browse(self, url: str,
+               question: str = "Identify login forms, inputs, notable features, and the tech stack.") -> dict:
+        """Load the page in a real browser and SEE it (screenshot + vision) — catches JS-rendered
+        forms/features static recon misses."""
+        if self.scope.mode == "static":
+            return {"error": "static mode: no browser"}
+        self.scope.require(url)
+        try:
+            from .browser import snapshot, vision_analyze
+            snap = snapshot(url)
+        except ImportError:
+            return {"error": "browser needs: pip install playwright && playwright install chromium"}
+        except Exception as e:  # noqa: BLE001 — navigation can fail many ways
+            return {"error": f"browser: {str(e)[:140]}"}
+        vision = vision_analyze(snap["png"], f"You are a pentester viewing {url}. {question}")
+        return {"title": snap["title"], "vision": vision[:1500],
+                "links": snap["links"][:40], "forms": snap["forms"][:10]}
+
     def hypothesize(self, statement: str, based_on: list | None = None,
                     test: str = "", status: str = "untested") -> dict:
         """Record a link between observations → a possible attack path, and how to test it."""
@@ -193,7 +211,8 @@ class Agent:
               "record_finding": self.record_finding,
               "establish_foothold": self.establish_foothold,
               "run_command": self.run_command, "privesc_scan": self.privesc_scan,
-              "loot": self.loot, "hypothesize": self.hypothesize}.get(name)
+              "loot": self.loot, "hypothesize": self.hypothesize,
+              "browse": self.browse}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -261,6 +280,15 @@ TOOLS = [
                        "Then confirm a candidate with run_command and check for uid=0.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
+        "name": "browse",
+        "description": "Load a URL in a real headless Chromium and SEE it: returns a vision "
+                       "analysis of the screenshot plus rendered links and forms. Use for recon, "
+                       "especially JS-heavy pages where static fetch misses forms/features.",
+        "parameters": {"type": "object", "properties": {
+            "url": {"type": "string"},
+            "question": {"type": "string", "description": "what to look for on the page"}},
+            "required": ["url"]}}},
+    {"type": "function", "function": {
         "name": "hypothesize",
         "description": "Record a hypothesis that LINKS findings/observations into a possible "
                        "attack path (credential reuse across services, an exposed config that "
@@ -285,7 +313,9 @@ SYSTEM = (
     "You are MetSec, an authorized security agent pentesting the operator's OWN site "
     "(authorization is already verified via scope). Investigate the recon inventory using "
     "the tools: look up vulnerabilities for detected tech+versions, and probe in-scope URLs "
-    "to confirm conditions. Record a finding ONLY when backed by concrete evidence — a "
+    "to confirm conditions. For recon you can call browse(url) to load a page in a real "
+    "browser and SEE it (screenshot + vision), catching forms/features static recon misses. "
+    "Record a finding ONLY when backed by concrete evidence — a "
     "version match, a tool result, an exposed path, a reflected payload, or a missing "
     "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
     "not batch recording for the end. For every finding fill `affected` (WHERE: the exact "
@@ -466,5 +496,8 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     dev.hypothesize("looted creds may unlock admin", ["f1", "f2"], "replay creds", "confirmed")
     assert len(dev.hypotheses) == 1 and dev.hypotheses[0].status == "confirmed"
     assert dev.hypotheses[0].based_on == ["f1", "f2"]
+
+    stat = Agent(Scope(code_path=".", authorized_by="t", mode="static"), "x")
+    assert "static mode" in stat.browse("http://127.0.0.1/")["error"]  # no browser in static
     srv.shutdown()
     print("agent self-check ok")

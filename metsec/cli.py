@@ -238,6 +238,29 @@ def assess_cmd(args: list[str]) -> int:
     return 0
 
 
+def browse_cmd(args: list[str]) -> int:
+    """Scope-gated browser recon with vision (screenshot + Muse analysis)."""
+    if not args or "--scope" not in args:
+        print("usage: metsec browse <url> --scope <file>")
+        return 2
+    url = args[0]
+    try:
+        s = Scope.load(args[args.index("--scope") + 1])
+        s.require(url)
+        from .browser import snapshot, vision_analyze
+        snap = snapshot(url)
+    except (OutOfScope, FileNotFoundError) as e:
+        print(f"refused: {e}")
+        return 1
+    except Exception as e:  # noqa: BLE001
+        print(f"browser error: {e}")
+        return 1
+    print(f"{snap['title']} — {len(snap['links'])} links, {len(snap['forms'])} forms\n")
+    print(vision_analyze(snap["png"],
+                         f"You are a pentester viewing {url}. What is this page and what would you test?"))
+    return 0
+
+
 def scan_cmd(args: list[str]) -> int:
     """One-shot full scan: ensure the index exists, run active assess, write a report."""
     import time
@@ -325,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         return assess_cmd(rest)
     if cmd == "scan":
         return scan_cmd(rest)
+    if cmd == "browse":
+        return browse_cmd(rest)
     print(usage)
     return 2
 

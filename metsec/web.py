@@ -106,7 +106,7 @@ background:#06120caa;backdrop-filter:blur(3px);z-index:9}
 <script>
 const feed=document.getElementById('feed'),finds=document.getElementById('finds');
 const ICON={http_probe:'🌐',search_vulns:'🔎',record_finding:'📌',establish_foothold:'🎯',
-run_command:'⌨️',privesc_scan:'⬆️',loot:'💰'};
+run_command:'⌨️',privesc_scan:'⬆️',loot:'💰',browse:'📸',hypothesize:'💡'};
 let maxStage=-1;
 function stage(n){if(n<=maxStage)return;maxStage=n;
   document.querySelectorAll('.pill').forEach(p=>{if(+p.dataset.s<=n)p.classList.add('on')});}
