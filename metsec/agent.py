@@ -155,9 +155,7 @@ class Agent:
             return {"error": "refused: destructive command blocked"}
         out = self.channel.run(command)[:3000]
         events.emit("command", cmd=command[:160], output=out[:400])
-        if "uid=0(root)" in out:
-            events.emit("root")
-        return {"output": out}
+        return {"output": out}  # root is detected centrally in the loop (any tool)
 
     def privesc_scan(self) -> dict:
         """Enumerate the host and return GTFOBins-matched privilege-escalation candidates."""
@@ -411,9 +409,10 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
                     or args.get("tech") or "")
             print(f"  → {tc.function.name} {str(hint)[:72]}", file=sys.stderr, flush=True)
             events.emit("tool", name=tc.function.name, detail=str(hint)[:100])
-            msgs.append({"role": "tool", "tool_call_id": tc.id,
-                         "content": json.dumps(agent.dispatch(tc.function.name, args),
-                                               default=str)[:2000]})
+            rtext = json.dumps(agent.dispatch(tc.function.name, args), default=str)
+            if "uid=0(root)" in rtext:  # root reached via ANY tool (http_probe, run_command, …)
+                events.emit("root")
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": rtext[:2000]})
         return True
 
     msgs = [
