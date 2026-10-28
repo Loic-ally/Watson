@@ -1,0 +1,54 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Monochrome dark palette — near-black surfaces, off-white text, white accent.
+   Colour is reserved for one thing only: danger (high-severity findings + errors). */
+:root {
+  --background: 240 6% 7%;
+  --foreground: 240 6% 90%;
+  --card: 240 5% 10%;
+  --card-foreground: 240 6% 90%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 6% 8%;
+  --secondary: 240 5% 15%;
+  --secondary-foreground: 240 6% 90%;
+  --muted: 240 5% 14%;
+  --muted-foreground: 240 5% 56%;
+  --accent: 0 0% 98%;
+  --accent-foreground: 240 6% 8%;
+  --destructive: 0 70% 55%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5% 17%;
+  --input: 240 5% 17%;
+  --ring: 0 0% 70%;
+  --radius: 0.5rem;
+}
+
+* { border-color: hsl(var(--border)); }
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* severity pills — grayscale ramp, red only for critical/high (meaning, not decoration) */
+.pill { display: inline-block; padding: 2px 9px; border-radius: 5px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.sev-critical { background: hsl(0 70% 48%); color: #fff; }
+.sev-high { background: hsl(0 65% 56%); color: #fff; }
+.sev-medium { background: hsl(240 5% 26%); color: hsl(240 6% 88%); }
+.sev-low { background: hsl(240 5% 19%); color: hsl(240 5% 70%); }
+.sev-info { background: hsl(240 5% 15%); color: hsl(240 5% 60%); }
+
+/* agent event feed */
+.feed { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
+.ev { padding: 7px 11px; margin-bottom: 5px; border-left: 2px solid hsl(var(--border)); background: hsl(var(--card)); border-radius: 0 6px 6px 0; }
+.ev.ev-accent { border-left-color: hsl(var(--muted-foreground)); }
+.ev.ev-win { border-left-color: hsl(var(--foreground)); }
+.ev.ev-err { border-left-color: hsl(var(--destructive)); }
+.ev .d { color: hsl(var(--muted-foreground)); word-break: break-all; }
+.ev pre { margin: 5px 0 0; padding: 8px; background: hsl(240 6% 5%); border: 1px solid hsl(var(--border)); border-radius: 5px; color: hsl(240 5% 78%); white-space: pre-wrap; max-height: 150px; overflow: auto; }
+.kbd { background: hsl(240 5% 13%); border: 1px solid hsl(var(--border)); border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, monospace; font-size: 12px; color: hsl(var(--foreground)); }
