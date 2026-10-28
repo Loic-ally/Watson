@@ -127,6 +127,10 @@ src.onmessage=ev=>{const e=JSON.parse(ev.data);
  if(e.type==='command'){const r=document.createElement('div');r.className='row cmd';
    r.innerHTML=`<span class="ic">⌨️</span><span class="d">${esc(e.cmd)}</span><pre>${esc(e.output)||'(no output)'}</pre>`;
    add(r);stage(3);return;}
+ if(e.type==='hypothesis'){const r=document.createElement('div');r.className='row';
+   r.style.borderLeftColor='var(--pur)';
+   r.innerHTML=`<span class="ic">💡</span><b>hypothesis</b> <span class="d">${esc(e.statement)}</span>`;
+   add(r);return;}
  if(e.type==='foothold'){const r=document.createElement('div');r.className='row foot';
    r.innerHTML=`<span class="ic">🎯</span><b>FOOTHOLD</b> via ${esc(e.kind)} <span class="d">${esc(e.whoami)}</span>`;
    add(r);stage(2);flash('FOOTHOLD');return;}

@@ -43,6 +43,15 @@ class Finding:
     exploitation: str = ""       # HOW it is exploited (technique + steps)
 
 
+@dataclass
+class Hypothesis:
+    """A reasoned link between observations → a possible attack path."""
+    statement: str
+    based_on: list = field(default_factory=list)
+    test: str = ""
+    status: str = "untested"     # untested | confirmed | refuted
+
+
 class Agent:
     """Holds scan state and exposes the tools the model may call."""
 
@@ -53,6 +62,7 @@ class Agent:
         self.exploit = exploit  # authorized aggressive exploitation (lifts prod gate)
         self.session = requests.Session()
         self.findings: list[Finding] = []
+        self.hypotheses: list[Hypothesis] = []
         self.channel = None  # exec foothold once established
 
     def search_vulns(self, tech: str, version: str = "") -> list[dict]:
@@ -171,12 +181,19 @@ class Agent:
         from .privesc import loot as _loot
         return _loot(self.channel.run) or {"info": "no readable secrets as current user"}
 
+    def hypothesize(self, statement: str, based_on: list | None = None,
+                    test: str = "", status: str = "untested") -> dict:
+        """Record a link between observations → a possible attack path, and how to test it."""
+        self.hypotheses.append(Hypothesis(statement, based_on or [], test, status))
+        events.emit("hypothesis", statement=statement[:160], status=status)
+        return {"recorded": True, "hypotheses": len(self.hypotheses)}
+
     def dispatch(self, name: str, args: dict) -> dict:
         fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
               "record_finding": self.record_finding,
               "establish_foothold": self.establish_foothold,
               "run_command": self.run_command, "privesc_scan": self.privesc_scan,
-              "loot": self.loot}.get(name)
+              "loot": self.loot, "hypothesize": self.hypothesize}.get(name)
         if not fn:
             return {"error": f"unknown tool {name}"}
         try:
@@ -244,6 +261,19 @@ TOOLS = [
                        "Then confirm a candidate with run_command and check for uid=0.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
+        "name": "hypothesize",
+        "description": "Record a hypothesis that LINKS findings/observations into a possible "
+                       "attack path (credential reuse across services, an exposed config that "
+                       "unlocks auth, a version with a known exploit chain, one vuln that lets "
+                       "you reach another). Say what would confirm or refute it, then test it.",
+        "parameters": {"type": "object", "properties": {
+            "statement": {"type": "string", "description": "the link between observations"},
+            "based_on": {"type": "array", "items": {"type": "string"},
+                         "description": "the findings/facts it connects"},
+            "test": {"type": "string", "description": "what action confirms or refutes it"},
+            "status": {"type": "string", "enum": ["untested", "confirmed", "refuted"]}},
+            "required": ["statement"]}}},
+    {"type": "function", "function": {
         "name": "loot",
         "description": "Capture readable credentials, SSH keys, .env secrets, and proof files "
                        "(root.txt/user.txt) through the foothold. Call after foothold and again "
@@ -260,8 +290,9 @@ SYSTEM = (
     "security header. Call record_finding IMMEDIATELY each time you confirm an issue — do "
     "not batch recording for the end. For every finding fill `affected` (WHERE: the exact "
     "endpoint/param/file:line), `exploitation` (HOW it is exploited: the technique and the "
-    "concrete steps/payload you used), `evidence`, and `remediation` (the fix). Never invent "
-    "vulnerabilities. Stop when done."
+    "concrete steps/payload you used), `evidence`, and `remediation` (the fix). Actively "
+    "connect the dots: when two observations might relate, call hypothesize to record the link "
+    "and what would test it, then test it. Never invent vulnerabilities. Stop when done."
 )
 DETECTION_NOTE = (" Prefer detection over exploitation. Mark a finding 'verified' only when a "
                   "probe confirmed it, otherwise 'potential'.")
@@ -344,8 +375,8 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 
 
 def assess(target: str | None, scope, active: bool = False, budget: int = 16,
-           exploit: bool = False, fresh: bool = False) -> list[Finding]:
-    """Full assessment: gather evidence (mode-appropriate) → agent loop → findings."""
+           exploit: bool = False, fresh: bool = False) -> "Agent":
+    """Full assessment: gather evidence → agent loop. Returns the Agent (.findings/.hypotheses)."""
     from . import cache
 
     target = target or scope.code_path
@@ -365,7 +396,7 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
         cache.put(inv, ckey)
     agent = Agent(scope, target, budget, exploit=exploit)
     run_agent(agent, inv)
-    return agent.findings
+    return agent
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, offline)
@@ -427,7 +458,13 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert "destructive" in exp.run_command("rm -rf /")["error"]
     assert "destructive" in exp.run_command("mkfs.ext4 /dev/sda1")["error"]
 
-    dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed")
+    dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed",
+                       exploitation="GET /search?q=<payload>, reflected unescaped")
     assert len(dev.findings) == 1 and dev.findings[0].status == "verified"
+    assert dev.findings[0].exploitation.startswith("GET /search")
+
+    dev.hypothesize("looted creds may unlock admin", ["f1", "f2"], "replay creds", "confirmed")
+    assert len(dev.hypotheses) == 1 and dev.hypotheses[0].status == "confirmed"
+    assert dev.hypotheses[0].based_on == ["f1", "f2"]
     srv.shutdown()
     print("agent self-check ok")

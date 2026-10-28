@@ -34,7 +34,7 @@ def summarize(findings: list) -> dict:
     return {s: counts[s] for s in SEV_ORDER if s in counts}
 
 
-def _markdown(findings: list, meta: dict) -> str:
+def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str:
     counts = summarize(findings)
     badge = " · ".join(f"{n} {s}" for s, n in counts.items())
     out = [
@@ -46,6 +46,16 @@ def _markdown(findings: list, meta: dict) -> str:
         f"- **Findings:** {len(findings)} ({badge})" if findings else "- **Findings:** 0",
         "", "---", "",
     ]
+    if hypotheses:
+        out += ["## Hypotheses & attack chain", ""]
+        for h in hypotheses:
+            mark = {"confirmed": "✅", "refuted": "❌"}.get(h.status, "🔎")
+            out.append(f"- {mark} **{h.statement}**")
+            if h.based_on:
+                out.append(f"  - links: {', '.join(str(b) for b in h.based_on)}")
+            if h.test:
+                out.append(f"  - test: {h.test}")
+        out += ["", "---", ""]
     for f in findings:
         out.append(f"## [{f.severity.upper()} · {f.status}] {f.title}")
         if f.affected:
@@ -64,22 +74,24 @@ def _markdown(findings: list, meta: dict) -> str:
     return "\n".join(out)
 
 
-def write_reports(findings: list, meta: dict, out_dir: str) -> tuple[Path, Path]:
+def write_reports(findings: list, meta: dict, out_dir: str,
+                  hypotheses: list | None = None) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     ranked = dedup_rank(findings)
     data = {"meta": meta, "summary": summarize(ranked),
-            "findings": [asdict(f) for f in ranked]}
+            "findings": [asdict(f) for f in ranked],
+            "hypotheses": [asdict(h) for h in (hypotheses or [])]}
     jpath, mpath = out / "findings.json", out / "report.md"
     jpath.write_text(json.dumps(data, indent=2))
-    mpath.write_text(_markdown(ranked, meta))
+    mpath.write_text(_markdown(ranked, meta, hypotheses or []))
     return jpath, mpath
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
     import tempfile
 
-    from .agent import Finding
+    from .agent import Finding, Hypothesis
 
     fs = [
         Finding("Reflected XSS", "medium", "potential", affected="/search"),
@@ -95,8 +107,13 @@ if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
     with tempfile.TemporaryDirectory() as d:
         meta = {"target": "http://x/", "mode": "dev", "exploit": True,
                 "authorized_by": "owner", "date": "2026-10-27"}
-        j, m = write_reports(fs, meta, d)
+        hyps = [Hypothesis("looted DB password may unlock the admin login",
+                           ["Exposed .env", "admin login form"], "replay creds", "confirmed")]
+        j, m = write_reports(fs, meta, d, hypotheses=hyps)
         data = json.loads(j.read_text())
         assert len(data["findings"]) == 3 and data["meta"]["exploit"] is True
-        assert "Exposed .env" in m.read_text() and "Exploitation:** enabled" in m.read_text()
+        assert len(data["hypotheses"]) == 1 and data["hypotheses"][0]["status"] == "confirmed"
+        md = m.read_text()
+        assert "Exploitation:** enabled" in md and "Exposed .env" in md
+        assert "Hypotheses & attack chain" in md and "looted DB password" in md
     print("report self-check ok")

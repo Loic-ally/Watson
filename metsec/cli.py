@@ -205,12 +205,13 @@ def assess_cmd(args: list[str]) -> int:
         if s.mode != "static" and not target:
             print("non-static mode needs a target url")
             return 2
-        findings = assess(target, s, active="--active" in args, budget=budget,
-                          exploit=exploit, fresh="--fresh" in args)
+        result = assess(target, s, active="--active" in args, budget=budget,
+                        exploit=exploit, fresh="--fresh" in args)
     except (OutOfScope, FileNotFoundError) as e:
         print(f"refused: {e}")
         return 1
-    findings = dedup_rank(findings)
+    findings = dedup_rank(result.findings)
+    hyps = result.hypotheses
     for f in findings:
         print(f"\n[{f.severity.upper()} · {f.status}] {f.title}")
         if f.affected:
@@ -224,11 +225,15 @@ def assess_cmd(args: list[str]) -> int:
         if f.refs:
             print(f"  refs: {', '.join(str(r) for r in f.refs[:3])}")
     print(f"\n{len(findings)} finding(s)" if findings else "no findings")
+    if hyps:
+        print(f"\nhypotheses ({len(hyps)}):")
+        for h in hyps:
+            print(f"  [{h.status}] {h.statement[:120]}")
     if out_dir:
         meta = {"target": target or s.code_path, "mode": s.mode, "exploit": exploit,
                 "authorized_by": s.authorized_by,
                 "date": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        j, m = write_reports(findings, meta, out_dir)
+        j, m = write_reports(findings, meta, out_dir, hypotheses=hyps)
         print(f"\nwrote {j}  and  {m}")
     return 0
 
