@@ -11,6 +11,7 @@
 
 mod auth;
 mod bridge;
+mod files;
 mod scan;
 mod state;
 
@@ -37,6 +38,13 @@ async fn main() {
         .route("/api/chat", post(scan::api_chat))
         .route("/api/status", get(scan::api_status))
         .route("/stream", get(scan::stream))
+        .route("/api/knowledge", get(files::api_knowledge))
+        .route("/api/transcribe", post(files::api_transcribe))
+        .route("/api/reports", get(files::api_reports))
+        .route("/api/report/:name", get(files::api_report))
+        .route("/api/report/:name/html", get(files::report_html))
+        .route("/api/report/:name/pdf", get(files::report_pdf))
+        .route("/shot/:id", get(files::shot))
         .fallback_service(tower_http::services::ServeDir::new(root().join("frontend/dist")))
         .with_state(state);
 
