@@ -487,11 +487,15 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
             msgs.append({"role": "tool", "tool_call_id": tc.id, "content": rtext[:2000]})
         return True
 
+    mem = inventory.get("_memory", "") if isinstance(inventory, dict) else ""
+    inv_dump = {k: v for k, v in inventory.items() if k != "_memory"} if isinstance(inventory, dict) else inventory
+    user = (f"Recon inventory for {agent.target}:\n" + json.dumps(inv_dump, default=str)[:7000]
+            + "\n\nInvestigate with the tools and record grounded findings. Stop when done.")
+    if mem:
+        user = mem + "\n\n" + user
     msgs = [
         {"role": "system", "content": SYSTEM + (EXPLOIT_NOTE if agent.exploit else DETECTION_NOTE)},
-        {"role": "user", "content": f"Recon inventory for {agent.target}:\n"
-         + json.dumps(inventory, default=str)[:7000]
-         + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
+        {"role": "user", "content": user},
     ]
     exhausted = True
     for _ in range(agent.budget):  # budget is a safety cap; the agent stops itself via finish()
@@ -532,8 +536,15 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
                 raw.update(active_recon(target, scope))
         inv = _inventory_json(raw)
         cache.put(inv, ckey)
+    from . import memory
+    note = memory.context(target)
+    if note:
+        inv = {**inv, "_memory": note}
     agent = Agent(scope, target, budget, exploit=exploit)
     run_agent(agent, inv)
+    from dataclasses import asdict as _asdict
+    memory.remember(target, [_asdict(f) for f in agent.findings], inv,
+                    foothold=agent.channel.kind if agent.channel else "")
     return agent
 
 
