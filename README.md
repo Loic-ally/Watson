@@ -81,15 +81,20 @@ the web **chat** takes **voice** (Muse Voice Transcribe) and can read replies al
 
 ## Web app
 
-`metsec web` serves a dark-themed control panel at **http://127.0.0.1:8787** (login
-`admin` / `METSEC_WEB_PASS`, default `metsec`):
+A **React/TypeScript** control panel (Vite + Tailwind + shadcn/ui) served by a thin
+**Rust (Axum)** backend at **http://127.0.0.1:8787** (login `admin` / `METSEC_WEB_PASS`,
+default `metsec`). The Rust server shells out to `python -m metsec.bridge`; the agent is
+untouched. Run it with `cd backend && cargo run` (serves `frontend/dist`) — see
+[WEBUI.md](WEBUI.md) for dev/build details.
 
 - **Chat** — tell the agent what to do in natural language (*"pentest http://127.0.0.1:5002
   in dev mode with exploit"*); it parses the instruction, launches the scan, and **streams
-  its path live** in the conversation. Non-scan messages are answered from the latest run.
+  its path live**. Conversations **persist** (browser history) so you can reopen a past chat.
 - **Dashboard** — live kill-chain tracker (Recon → Exploit → Foothold → Privesc → ROOT).
-- **Reports** — every past assessment with CVSS + findings; open the full styled report.
-- **Knowledge** — search the CVE / technique index from the browser.
+- **Reports** — summary cards + every past assessment with CVSS; open the styled report or PDF.
+- **Knowledge** — CVE/technique search with full detail (CVSS, KEV, products, CWE, references).
+
+The legacy Flask panel (`metsec web`) still works and shares the same report files.
 
 ## The agent
 
@@ -148,3 +153,5 @@ Intentionally vulnerable, **localhost only** — run `./testbed/<box>/run.sh`:
 | Browser | **Playwright** headless Chromium (optional) |
 | External tools | **Exegol** container (docker exec) + pure-Python fallbacks |
 | SAST | **Semgrep** (multi-language) + Python AST |
+| Web backend | **Rust** (Axum) — thin API over `python -m metsec.bridge` |
+| Web frontend | **TypeScript** (React + Vite + Tailwind + shadcn/ui) |
