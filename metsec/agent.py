@@ -64,6 +64,7 @@ class Agent:
         self.session = requests.Session()
         self.findings: list[Finding] = []
         self.hypotheses: list[Hypothesis] = []
+        self.shots: list[dict] = []  # screenshots captured this run → embedded in the report
         self.channel = None  # exec foothold once established
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
         self.done = False    # the agent declares the assessment complete
@@ -249,6 +250,7 @@ class Agent:
         from . import shots
         sid = shots.save(snap["png"])
         events.emit("screenshot", id=sid, url=url, caption=vision[:140])
+        self.shots.append({"id": sid, "url": url, "caption": vision[:140]})
         return {"title": snap["title"], "vision": vision[:1500], "screenshot": sid,
                 "links": snap["links"][:40], "forms": snap["forms"][:10]}
 
@@ -270,6 +272,7 @@ class Agent:
             from . import shots
             sid = shots.save(res.pop("png"))
             events.emit("screenshot", id=sid, url=url, caption=res.get("vision", "")[:140])
+            self.shots.append({"id": sid, "url": url, "caption": res.get("vision", "")[:140]})
             res["screenshot"] = sid
         return res
 

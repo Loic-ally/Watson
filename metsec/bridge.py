@@ -64,7 +64,7 @@ def scan(params: dict) -> None:
             meta = {"target": target, "mode": mode, "exploit": exploit,
                     "authorized_by": authorized_by, "date": time.strftime("%Y-%m-%d %H:%M")}
             write_reports(findings, meta, outdir, hypotheses=res.hypotheses,
-                          narrative=narrative(findings, res.hypotheses))
+                          narrative=narrative(findings, res.hypotheses), shots=res.shots)
             result_box["report"] = outdir
             result_box["findings"] = [asdict(f) for f in findings]
         except Exception as e:  # noqa: BLE001

@@ -47,7 +47,8 @@ def summarize(findings: list) -> dict:
     return {s: counts[s] for s in SEV_ORDER if s in counts}
 
 
-def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str:
+def _markdown(findings: list, meta: dict, hypotheses: list | None = None,
+              shots: list | None = None) -> str:
     counts = summarize(findings)
     badge = " · ".join(f"{n} {s}" for s, n in counts.items())
     out = [
@@ -89,6 +90,13 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str
         out.append("")
     if not findings:
         out.append("_No findings._")
+    if shots:
+        out += ["", "---", "", "## Screenshots", ""]
+        for s in shots:
+            cap = s.get("caption") or s.get("url") or s["id"]
+            out.append(f"![{cap}](shots/{s['id']}.png)")
+            out.append(f"*{cap}*")
+            out.append("")
     return "\n".join(out)
 
 
@@ -109,7 +117,7 @@ def narrative(findings: list, hypotheses: list | None = None) -> str:
         return ""
 
 
-def _html(findings: list, meta: dict, hypotheses: list, narr: str) -> str:
+def _html(findings: list, meta: dict, hypotheses: list, narr: str, shots: list | None = None) -> str:
     import html as _h
 
     def esc(s):
@@ -128,6 +136,14 @@ def _html(findings: list, meta: dict, hypotheses: list, narr: str) -> str:
                      f'<b>{esc(f.title)}</b><span class="cv">CVSS {cvss(f)}</span></div>'
                      + "".join(rows) + "</div>")
     hyps = "".join(f"<li>{esc(h.statement)} <i>({esc(h.status)})</i></li>" for h in hypotheses)
+    gallery = ""
+    if shots:
+        figs = "".join(
+            f'<figure class="shot"><a href="shots/{esc(s["id"])}.png" target="_blank">'
+            f'<img src="shots/{esc(s["id"])}.png" loading="lazy"></a>'
+            f'<figcaption>{esc(s.get("caption") or s.get("url"))}</figcaption></figure>'
+            for s in shots)
+        gallery = f"<h2>Screenshots</h2><div class='gal'>{figs}</div>"
     badge = " · ".join(f"{n} {s}" for s, n in summarize(findings).items())
     return (
         "<!doctype html><html><head><meta charset='utf-8'><title>MetSec Report</title><style>"
@@ -138,7 +154,12 @@ def _html(findings: list, meta: dict, hypotheses: list, narr: str) -> str:
         ".hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.sev{color:#0b0e14;font-weight:700;"
         "font-size:11px;padding:2px 8px;border-radius:4px}.cv{margin-left:auto;color:#6b7689;font-size:12px}"
         ".r{font-size:13px;margin-top:6px;color:#aab6c6}.r b{color:#c9d4e3}.score{font-size:22px;color:#f87272;"
-        "font-weight:700}li{margin:4px 0}</style></head><body><h1>⬢ MetSec Report</h1>"
+        "font-weight:700}li{margin:4px 0}"
+        ".gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}"
+        ".shot{margin:0;background:#121722;border:1px solid #1f2633;border-radius:6px;padding:8px}"
+        ".shot img{width:100%;border-radius:4px;display:block}"
+        ".shot figcaption{color:#6b7689;font-size:12px;margin-top:6px;word-break:break-word}"
+        "</style></head><body><h1>⬢ MetSec Report</h1>"
         f"<p class='meta'>{esc(meta.get('target'))} · mode {esc(meta.get('mode'))} · exploitation "
         f"{'on' if meta.get('exploit') else 'off'} · {esc(meta.get('date'))}<br>authorized by "
         f"{esc(meta.get('authorized_by'))}</p>"
@@ -147,22 +168,49 @@ def _html(findings: list, meta: dict, hypotheses: list, narr: str) -> str:
         + (f"<h2>Attack narrative</h2><p>{esc(narr)}</p>" if narr else "")
         + (f"<h2>Hypotheses &amp; attack chain</h2><ul>{hyps}</ul>" if hyps else "")
         + "<h2>Findings</h2>" + ("".join(cards) if cards else "<p>No findings.</p>")
+        + gallery
         + "</body></html>")
 
 
+def _copy_shots(shots: list, out: Path) -> list:
+    """Copy each captured screenshot into <out>/shots/ so the report is self-contained."""
+    import shutil
+
+    from . import shots as store
+
+    saved = []
+    if not shots:
+        return saved
+    dest = out / "shots"
+    dest.mkdir(exist_ok=True)
+    for s in shots:
+        sid = s.get("id")
+        src = store.path(sid) if sid else None
+        if not src:
+            continue
+        try:
+            shutil.copyfile(src, dest / f"{sid}.png")
+            saved.append({"id": sid, "url": s.get("url", ""), "caption": s.get("caption", "")})
+        except OSError:
+            continue
+    return saved
+
+
 def write_reports(findings: list, meta: dict, out_dir: str, hypotheses: list | None = None,
-                  narrative: str = "") -> tuple[Path, Path, Path]:
+                  narrative: str = "", shots: list | None = None) -> tuple[Path, Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     ranked = dedup_rank(findings)
+    shots = _copy_shots(shots or [], out)
     meta = {**meta, "narrative": narrative, "overall_cvss": overall_score(ranked)}
     data = {"meta": meta, "summary": summarize(ranked),
             "findings": [{**asdict(f), "cvss": cvss(f)} for f in ranked],
-            "hypotheses": [asdict(h) for h in (hypotheses or [])]}
+            "hypotheses": [asdict(h) for h in (hypotheses or [])],
+            "shots": shots}
     jpath, mpath, hpath = out / "findings.json", out / "report.md", out / "report.html"
     jpath.write_text(json.dumps(data, indent=2))
-    mpath.write_text(_markdown(ranked, meta, hypotheses or []))
-    hpath.write_text(_html(ranked, meta, hypotheses or [], narrative))
+    mpath.write_text(_markdown(ranked, meta, hypotheses or [], shots))
+    hpath.write_text(_html(ranked, meta, hypotheses or [], narrative, shots))
     return jpath, mpath, hpath
 
 
@@ -184,7 +232,7 @@ def _fallback_html(data: dict) -> str:
     hs = [Hypothesis(**{k: h.get(k) for k in ("statement", "based_on", "test", "status")})
           for h in data.get("hypotheses", [])]
     meta = data.get("meta", {})
-    return _html(fs, meta, hs, meta.get("narrative", ""))
+    return _html(fs, meta, hs, meta.get("narrative", ""), data.get("shots", []))
 
 
 def craft_template_html(data: dict) -> str:

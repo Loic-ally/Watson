@@ -106,7 +106,7 @@ def _run(run: dict, params: dict, authorized_by: str) -> None:
         meta = {"target": run["target"], "mode": run["mode"], "exploit": run["exploit"],
                 "authorized_by": authorized_by, "date": time.strftime("%Y-%m-%d %H:%M")}
         write_reports(findings, meta, outdir, hypotheses=result.hypotheses,
-                      narrative=narrative(findings, result.hypotheses))
+                      narrative=narrative(findings, result.hypotheses), shots=result.shots)
         run["report"] = outdir
         run["status"] = "done"
     except Exception as e:  # noqa: BLE001

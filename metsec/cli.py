@@ -236,7 +236,7 @@ def assess_cmd(args: list[str]) -> int:
                 "authorized_by": s.authorized_by, "audit": audit.path(),
                 "date": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         j, m, h = write_reports(findings, meta, out_dir, hypotheses=hyps,
-                                narrative=narrative(findings, hyps))
+                                narrative=narrative(findings, hyps), shots=result.shots)
         print(f"\nwrote {j}\n      {m}\n      {h}")
         if "--pdf" in args:
             from .report import make_pdf
@@ -354,11 +354,12 @@ def scan_all_cmd(args: list[str]) -> int:
     for t, r in results.items():
         print(f"  {t}: {'ERROR ' + str(r) if isinstance(r, Exception) else str(len(r.findings)) + ' finding(s)'}")
     findings = dedup_rank(merge_findings(results))
+    shots = [sh for r in results.values() if not isinstance(r, Exception) for sh in r.shots]
     out_dir = args[args.index("--out") + 1] if "--out" in args \
         else f"metsec-report-{time.strftime('%Y%m%d-%H%M%S')}"
     meta = {"target": ", ".join(targets), "mode": s.mode, "exploit": exploit,
             "authorized_by": s.authorized_by, "date": time.strftime("%Y-%m-%d %H:%M")}
-    j, m, h = write_reports(findings, meta, out_dir, narrative=narrative(findings, []))
+    j, m, h = write_reports(findings, meta, out_dir, narrative=narrative(findings, []), shots=shots)
     print(f"\n{len(findings)} finding(s) total\nwrote {j}\n      {m}\n      {h}")
     return 0
 
