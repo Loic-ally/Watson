@@ -144,6 +144,19 @@ def create_app():
                             + (" (exploit ON)" if r["exploit"] else "") + " — watch it below."}
         return {"type": "reply", "text": runs.answer(msg)}
 
+    @app.route("/api/transcribe", methods=["POST"])
+    @login_required
+    def api_transcribe():
+        from . import config
+        audio = request.files.get("audio")
+        if not audio:
+            return {"text": "", "error": "no audio"}
+        try:
+            return {"text": config.transcribe(
+                audio.read(), sample_rate=int(request.form.get("sample_rate", 16000)))}
+        except Exception as e:  # noqa: BLE001
+            return {"text": "", "error": str(e)[:160]}
+
     @app.route("/stream")
     @login_required
     def stream():
@@ -293,7 +306,9 @@ _CHAT_BODY = r"""
 <div class="m bot">Hi — I'm your pentest agent. Tell me a target to assess (you must be authorized),
 ask about the last run, or search for a vuln. Try: <span class="kbd">scan http://127.0.0.1:5002 in dev mode with exploit</span></div>
 </div>
-<div class="inbar"><input id="in" placeholder="Message the agent…" autofocus>
+<div class="inbar"><input id="in" placeholder="Message the agent… (or tap 🎤)" autofocus>
+<button class="btn" id="mic" onclick="mic()" title="Voice input" style="background:#1d2635;color:var(--txt)">🎤</button>
+<button class="btn" id="ttsb" onclick="toggleTts()" title="Read replies aloud" style="background:#1d2635;color:var(--mut)">🔇</button>
 <button class="btn" onclick="send()">Send</button></div></div>
 <script>""" + _FEED_JS + r"""
 const msgs=document.getElementById('msgs'),inp=document.getElementById('in');
@@ -302,15 +317,48 @@ let streaming=false,idx0=null;
 async function send(){const t=inp.value.trim();if(!t)return;inp.value='';add('user',esc(t));
  const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:t})});
  const j=await r.json();
- if(j.type==='reply'){add('bot',esc(j.text));}
+ if(j.type==='reply'){add('bot',esc(j.text));speak(j.text);}
  else if(j.type==='error'){add('sys','⚠️ '+esc(j.text));}
- else if(j.type==='scan'){add('bot',esc(j.text));startFeed();}}
+ else if(j.type==='scan'){add('bot',esc(j.text));speak(j.text);startFeed();}}
 inp.addEventListener('keydown',e=>{if(e.key==='Enter')send();});
 function startFeed(){if(streaming)return;streaming=true;
  const feed=add('bot','<div class="feed" id="live"></div>');const live=feed.querySelector('#live');
  const src=new EventSource('/stream');
  src.onmessage=ev=>{const e=JSON.parse(ev.data);const h=evHtml(e);if(h){live.insertAdjacentHTML('beforeend',h);msgs.scrollTop=msgs.scrollHeight;}
   if(e.type==='done'){src.close();streaming=false;add('sys','scan finished — see Reports');}};}
+// --- voice: STT in (Muse Voice Transcribe), TTS out (browser speechSynthesis) ---
+let tts=false;
+function toggleTts(){tts=!tts;const b=document.getElementById('ttsb');b.textContent=tts?'🔊':'🔇';b.style.color=tts?'var(--grn)':'var(--mut)';if(!tts)speechSynthesis.cancel();}
+function speak(t){if(!tts||!window.speechSynthesis)return;const u=new SpeechSynthesisUtterance((t||'').replace(/<[^>]+>/g,' ').slice(0,500));u.rate=1.05;speechSynthesis.cancel();speechSynthesis.speak(u);}
+let rec={on:false};
+async function mic(){
+ if(rec.on){stopRec();return;}
+ let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){add('sys','🎤 microphone blocked');return;}
+ const ctx=new (window.AudioContext||window.webkitAudioContext)();
+ const src=ctx.createMediaStreamSource(stream),node=ctx.createScriptProcessor(4096,1,1),buf=[];
+ node.onaudioprocess=e=>buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+ src.connect(node);node.connect(ctx.destination);
+ rec={on:true,ctx,src,node,stream,buf,sr:ctx.sampleRate};
+ const m=document.getElementById('mic');m.textContent='⏺';m.style.color='var(--red)';}
+function stopRec(){const r=rec;rec={on:false};
+ r.node.disconnect();r.src.disconnect();r.stream.getTracks().forEach(t=>t.stop());
+ const m=document.getElementById('mic');m.textContent='🎤';m.style.color='var(--txt)';
+ const wav=encodeWav(r.buf,r.sr);r.ctx.close();
+ const fd=new FormData();fd.append('audio',wav,'rec.wav');fd.append('sample_rate',r.sr);
+ add('sys','… transcribing');
+ fetch('/api/transcribe',{method:'POST',body:fd}).then(x=>x.json()).then(j=>{
+  if(j.text){inp.value=j.text;send();}else add('sys','⚠️ '+(j.error||'no transcript'));});}
+function encodeWav(chunks,sr){
+ let len=chunks.reduce((a,c)=>a+c.length,0);const pcm=new Float32Array(len);let o=0;
+ for(const c of chunks){pcm.set(c,o);o+=c.length;}
+ const b=new ArrayBuffer(44+len*2),v=new DataView(b);
+ const ws=(off,s)=>{for(let i=0;i<s.length;i++)v.setUint8(off+i,s.charCodeAt(i));};
+ ws(0,'RIFF');v.setUint32(4,36+len*2,true);ws(8,'WAVE');ws(12,'fmt ');
+ v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+ v.setUint32(24,sr,true);v.setUint32(28,sr*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);
+ ws(36,'data');v.setUint32(40,len*2,true);let off=44;
+ for(let i=0;i<len;i++){let s=Math.max(-1,Math.min(1,pcm[i]));v.setInt16(off,s<0?s*0x8000:s*0x7FFF,true);off+=2;}
+ return new Blob([b],{type:'audio/wav'});}
 </script>"""
 
 _DASH_BODY = r"""

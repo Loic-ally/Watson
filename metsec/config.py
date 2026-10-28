@@ -5,9 +5,11 @@ Key comes from META_API_KEY in .env (never hard-coded).
 """
 from __future__ import annotations
 
+import json
 import os
 from functools import lru_cache
 
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -39,3 +41,19 @@ def chat(prompt, model: str = FAST, reasoning_effort: str | None = None, **kw) -
         kw["reasoning_effort"] = reasoning_effort
     resp = client().chat.completions.create(model=model, messages=msgs, **kw)
     return resp.choices[0].message.content
+
+
+VOICE = "muse-voice-transcribe-1.0"
+
+
+def transcribe(audio: bytes, sample_rate: int = 16000, encoding: str = "WAV",
+               language: str = "en") -> str:
+    """Speech-to-text via Muse Voice Transcribe. `audio` is a WAV byte string."""
+    req = {"model": VOICE, "audioEncoding": encoding, "sampleRateHertz": int(sample_rate),
+           "languageCode": language}
+    r = requests.post(f"{BASE_URL}/asr/transcribe",
+                      headers={"Authorization": f"Bearer {os.environ['META_API_KEY']}"},
+                      files={"audio": ("audio.wav", audio, "audio/wav")},
+                      data={"request": json.dumps(req)}, timeout=60)
+    r.raise_for_status()
+    return r.json().get("transcript", "")
