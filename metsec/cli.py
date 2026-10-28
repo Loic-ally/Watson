@@ -352,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         return scan_cmd(rest)
     if cmd == "browse":
         return browse_cmd(rest)
+    if cmd == "web":
+        from .webapp import serve
+        serve(int(rest[rest.index("--port") + 1]) if "--port" in rest else 8787)
+        return 0
     print(usage)
     return 2
 
