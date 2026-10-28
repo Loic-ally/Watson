@@ -24,6 +24,15 @@ def serve(port: int = 8787) -> None:
     def index():
         return DASH
 
+    @app.route("/shot/<sid>")
+    def shot(sid):
+        from flask import abort, send_file
+        from . import shots
+        p = shots.path(sid)
+        if not p:
+            abort(404)
+        return send_file(str(p.resolve()), mimetype="image/png")
+
     @app.route("/stream")
     def stream():
         def gen():
@@ -124,6 +133,8 @@ src.onmessage=ev=>{const e=JSON.parse(ev.data);
  if(e.type==='tool'){const r=document.createElement('div');r.className='row';
    r.innerHTML=`<span class="ic">${ICON[e.name]||'•'}</span><b>${e.name}</b> <span class="d">${esc(e.detail)}</span>`;
    add(r);if(SS[e.name]!=null)stage(SS[e.name]);return;}
+ if(e.type==='screenshot'){const r=document.createElement('div');r.className='row';r.style.borderLeftColor='var(--pur)';
+   r.innerHTML=`<span class="ic">📸</span><span class="d">${esc(e.caption||e.url)}</span><br><a href="/shot/${esc(e.id)}" target="_blank"><img src="/shot/${esc(e.id)}" style="max-width:100%;margin-top:6px;border:1px solid var(--line);border-radius:6px"></a>`;add(r);return;}
  if(e.type==='command'){const r=document.createElement('div');r.className='row cmd';
    r.innerHTML=`<span class="ic">⌨️</span><span class="d">${esc(e.cmd)}</span><pre>${esc(e.output)||'(no output)'}</pre>`;
    add(r);stage(3);return;}

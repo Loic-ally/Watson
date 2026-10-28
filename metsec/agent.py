@@ -246,7 +246,10 @@ class Agent:
         except Exception as e:  # noqa: BLE001 — navigation can fail many ways
             return {"error": f"browser: {str(e)[:140]}"}
         vision = vision_analyze(snap["png"], f"You are a pentester viewing {url}. {question}")
-        return {"title": snap["title"], "vision": vision[:1500],
+        from . import shots
+        sid = shots.save(snap["png"])
+        events.emit("screenshot", id=sid, url=url, caption=vision[:140])
+        return {"title": snap["title"], "vision": vision[:1500], "screenshot": sid,
                 "links": snap["links"][:40], "forms": snap["forms"][:10]}
 
     def browser_action(self, url: str, steps: list) -> dict:
@@ -258,11 +261,17 @@ class Agent:
             return {"error": "steps must be a non-empty list of {find, fill?}"}
         try:
             from .browser import interact
-            return interact(url, steps)
+            res = interact(url, steps)
         except ImportError:
             return {"error": "browser needs: pip install playwright && playwright install chromium"}
         except Exception as e:  # noqa: BLE001
             return {"error": f"browser: {str(e)[:140]}"}
+        if isinstance(res, dict) and res.get("png"):
+            from . import shots
+            sid = shots.save(res.pop("png"))
+            events.emit("screenshot", id=sid, url=url, caption=res.get("vision", "")[:140])
+            res["screenshot"] = sid
+        return res
 
     def hypothesize(self, statement: str, based_on: list | None = None,
                     test: str = "", status: str = "untested") -> dict:

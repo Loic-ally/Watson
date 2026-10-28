@@ -173,6 +173,16 @@ def create_app():
                 time.sleep(0.4)
         return Response(gen(), mimetype="text/event-stream")
 
+    @app.route("/shot/<sid>")
+    @login_required
+    def shot(sid):
+        from flask import abort, send_file
+        from . import shots
+        p = shots.path(sid)
+        if not p:
+            abort(404)
+        return send_file(str(p.resolve()), mimetype="image/png")
+
     @app.route("/api/status")
     @login_required
     def status():
@@ -288,6 +298,7 @@ make_payload:'🧬',upload_shell:'📤',finish:'🏁'};
 const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function evHtml(e){
  if(e.type==='tool')return `<div class="ev"><b>${ICON[e.name]||'•'} ${e.name}</b> <span class="d">${esc(e.detail)}</span></div>`;
+ if(e.type==='screenshot')return `<div class="ev" style="border-left-color:var(--pur)">📸 <span class="d">${esc(e.caption||e.url)}</span><br><a href="/shot/${esc(e.id)}" target="_blank"><img src="/shot/${esc(e.id)}" loading="lazy" style="max-width:100%;margin-top:6px;border:1px solid var(--line);border-radius:6px"></a></div>`;
  if(e.type==='command')return `<div class="ev" style="border-left-color:var(--pur)"><span class="d">⌨️ ${esc(e.cmd)}</span><pre>${esc(e.output)||'(no output)'}</pre></div>`;
  if(e.type==='foothold')return `<div class="ev" style="border-left-color:var(--org)">🎯 <b>FOOTHOLD</b> via ${esc(e.kind)} <span class="d">${esc(e.whoami)}</span></div>`;
  if(e.type==='root')return `<div class="ev" style="border-left-color:var(--grn)">👑 <b style="color:var(--grn)">ROOT — uid=0</b></div>`;

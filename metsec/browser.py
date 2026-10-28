@@ -137,10 +137,11 @@ def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
                 page.wait_for_load_state("networkidle", timeout=4000)
             except Exception:  # noqa: BLE001
                 pass
-            vision = vision_analyze(page.screenshot(),
-                                    "After these actions, what does the page show now "
+            final = page.screenshot()
+            vision = vision_analyze(final, "After these actions, what does the page show now "
                                     "(errors, success, authenticated state)?")
-            return {"log": log, "url": page.url, "title": page.title(), "vision": vision[:1200]}
+            return {"log": log, "url": page.url, "title": page.title(),
+                    "vision": vision[:1200], "png": final}
         finally:
             browser.close()
 
