@@ -142,6 +142,8 @@ src.onmessage=ev=>{const e=JSON.parse(ev.data);
    d.innerHTML=`<span class="sev">${(e.severity||'').toUpperCase()}</span>${esc(e.title)}<span class="st">${esc(e.status)}</span>`;
    finds.insertBefore(d,finds.firstChild);
    stage(/privileg|escalat|\broot\b/i.test(e.title)?3:1);return;}
+ if(e.type==='finish'){const r=document.createElement('div');r.className='row';
+   r.innerHTML=`<span class="ic">🏁</span><b>agent finished</b> <span class="d">${esc(e.summary)}</span>`;add(r);return;}
  if(e.type==='done'){if(maxStage<4)setStatus('DONE','done');
    const r=document.createElement('div');r.className='row';r.innerHTML='<span class="ic">✅</span><b>assessment complete</b>';add(r);return;}
  if(e.type==='error'){const r=document.createElement('div');r.className='row';

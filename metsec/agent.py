@@ -64,6 +64,8 @@ class Agent:
         self.findings: list[Finding] = []
         self.hypotheses: list[Hypothesis] = []
         self.channel = None  # exec foothold once established
+        self.done = False    # the agent declares the assessment complete
+        self._calls: dict = {}  # repeat guard
 
     def search_vulns(self, tech: str, version: str = "") -> list[dict]:
         """Known vulns for a tech+version (OSV/web research + the CVE index)."""
@@ -219,8 +221,20 @@ class Agent:
         events.emit("hypothesis", statement=statement[:160], status=status)
         return {"recorded": True, "hypotheses": len(self.hypotheses)}
 
+    def finish(self, summary: str = "") -> dict:
+        """Declare the assessment complete — ends the run (you decide when you're done)."""
+        self.done = True
+        events.emit("finish", summary=summary[:200])
+        return {"done": True}
+
     def dispatch(self, name: str, args: dict) -> dict:
+        import json as _json
+        key = (name, _json.dumps(args, sort_keys=True, default=str)[:200])
+        self._calls[key] = self._calls.get(key, 0) + 1
+        if self._calls[key] > 4 and name not in ("finish", "record_finding", "hypothesize"):
+            return {"note": "identical call repeated — test something new, or call finish if done"}
         fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
+              "finish": self.finish,
               "record_finding": self.record_finding,
               "establish_foothold": self.establish_foothold,
               "run_command": self.run_command, "privesc_scan": self.privesc_scan,
@@ -327,6 +341,13 @@ TOOLS = [
             "status": {"type": "string", "enum": ["untested", "confirmed", "refuted"]}},
             "required": ["statement"]}}},
     {"type": "function", "function": {
+        "name": "finish",
+        "description": "Declare the assessment COMPLETE and end the run. Call this once you have "
+                       "reached the objective (e.g. root) or exhausted productive leads — do not "
+                       "keep re-probing. YOU decide when you are done.",
+        "parameters": {"type": "object", "properties": {
+            "summary": {"type": "string", "description": "one line: what you achieved"}}}}},
+    {"type": "function", "function": {
         "name": "loot",
         "description": "Capture readable credentials, SSH keys, .env secrets, and proof files "
                        "(root.txt/user.txt) through the foothold. Call after foothold and again "
@@ -349,7 +370,10 @@ SYSTEM = (
     "endpoint/param/file:line), `exploitation` (HOW it is exploited: the technique and the "
     "concrete steps/payload you used), `evidence`, and `remediation` (the fix). Actively "
     "connect the dots: when two observations might relate, call hypothesize to record the link "
-    "and what would test it, then test it. Never invent vulnerabilities. Stop when done."
+    "and what would test it, then test it. Never invent vulnerabilities. YOU decide when the "
+    "assessment is complete: call finish(summary) once you have reached the objective (e.g. "
+    "root) or exhausted productive leads. Do NOT re-probe what you already tested — each call "
+    "should test something new."
 )
 DETECTION_NOTE = (" Prefer detection over exploitation. Mark a finding 'verified' only when a "
                   "probe confirmed it, otherwise 'potential'.")
@@ -421,7 +445,11 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
          + json.dumps(inventory, default=str)[:7000]
          + "\n\nInvestigate with the tools and record grounded findings. Stop when done."},
     ]
-    exhausted = all(turn(msgs) for _ in range(agent.budget))
+    exhausted = True
+    for _ in range(agent.budget):  # budget is a safety cap; the agent stops itself via finish()
+        if not turn(msgs) or agent.done:
+            exhausted = False
+            break
     if exhausted:  # hit budget mid-investigation — force a wrap-up so findings aren't lost
         msgs.append({"role": "user", "content": "Probing budget reached. Call record_finding "
                      "now for every vulnerability you confirmed or have concrete evidence for, "
@@ -528,5 +556,11 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     stat = Agent(Scope(code_path=".", authorized_by="t", mode="static"), "x")
     assert "static mode" in stat.browse("http://127.0.0.1/")["error"]  # no browser in static
     assert "static mode" in stat.browser_action("http://127.0.0.1/", [{"find": "x"}])["error"]
+
+    assert dev.finish("rooted the box")["done"] is True and dev.done is True  # self-termination
+    g = Agent(Scope(ips=["127.0.0.1"], authorized_by="t", mode="dev"), base)
+    for _ in range(4):
+        g.dispatch("http_probe", {"url": f"{base}/x"})
+    assert "repeated" in g.dispatch("http_probe", {"url": f"{base}/x"}).get("note", ""), "repeat guard"
     srv.shutdown()
     print("agent self-check ok")
