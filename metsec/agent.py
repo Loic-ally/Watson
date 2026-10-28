@@ -147,6 +147,31 @@ class Agent:
         events.emit("foothold", kind=ch.kind, whoami=proof[:120])
         return {"foothold": ch.kind, "url": url, "param": param, "whoami": proof[:300]}
 
+    def upload_shell(self, upload_url: str, uploads_base: str, field: str = "file",
+                     lang: str = "php") -> dict:
+        """Foothold via file upload: upload a webshell, then exec through where it's served."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.scope.mode == "static":
+            return {"error": "static mode: no network"}
+        self.scope.require(upload_url)
+        self.scope.require(uploads_base)
+        from .exec_channel import upload_webshell
+        ch, proof = upload_webshell(self.session, upload_url, uploads_base, field, lang)
+        if not ch:
+            return {"error": proof}
+        self.channel = ch
+        events.emit("foothold", kind=ch.kind, whoami=proof[:120])
+        return {"foothold": "webshell", "whoami": proof[:300]}
+
+    def make_payload(self, kind: str, command: str) -> dict:
+        """Generate a serialized RCE payload to send to a deserialization sink via http_probe."""
+        from .exec_channel import pickle_payload
+        if kind in ("python", "pickle"):
+            return {"payload": pickle_payload(command),
+                    "note": "base64 Python pickle; send to a pickle.loads() sink (blind RCE)"}
+        return {"error": f"kind {kind!r} unsupported (java/php gadgets are app-specific)"}
+
     def run_command(self, command: str) -> dict:
         """Run a shell command through the established foothold (enumeration/privesc)."""
         if not self.exploit:
@@ -240,7 +265,8 @@ class Agent:
                   "establish_foothold": self.establish_foothold,
                   "run_command": self.run_command, "privesc_scan": self.privesc_scan,
                   "loot": self.loot, "hypothesize": self.hypothesize,
-                  "browse": self.browse, "browser_action": self.browser_action}.get(name)
+                  "browse": self.browse, "browser_action": self.browser_action,
+                  "upload_shell": self.upload_shell, "make_payload": self.make_payload}.get(name)
             if not fn:
                 result = {"error": f"unknown tool {name}"}
             else:
@@ -345,6 +371,22 @@ TOOLS = [
             "status": {"type": "string", "enum": ["untested", "confirmed", "refuted"]}},
             "required": ["statement"]}}},
     {"type": "function", "function": {
+        "name": "upload_shell",
+        "description": "Foothold via file upload: upload a webshell to upload_url, then execute "
+                       "through uploads_base/<file> (where uploaded files are served).",
+        "parameters": {"type": "object", "properties": {
+            "upload_url": {"type": "string"}, "uploads_base": {"type": "string"},
+            "field": {"type": "string", "description": "form file field name (default 'file')"},
+            "lang": {"type": "string", "description": "webshell language (php, …)"}},
+            "required": ["upload_url", "uploads_base"]}}},
+    {"type": "function", "function": {
+        "name": "make_payload",
+        "description": "Generate a serialized RCE payload (e.g. base64 Python pickle) to send to "
+                       "a deserialization sink via http_probe. kind: python/pickle.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string"}, "command": {"type": "string"}},
+            "required": ["kind", "command"]}}},
+    {"type": "function", "function": {
         "name": "finish",
         "description": "Declare the assessment COMPLETE and end the run. Call this once you have "
                        "reached the objective (e.g. root) or exhausted productive leads — do not "
@@ -387,7 +429,9 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "impact. Report 'verified' ONLY for issues you concretely exploited or "
                 "confirmed; DROP anything you could not confirm rather than reporting it as "
                 "potential — do not pad the report with speculation. When you confirm a remote "
-                "code execution vuln, call establish_foothold to get command execution, then "
+                "code execution vuln, call establish_foothold to get command execution (or "
+                "upload_shell for a file-upload webshell, or make_payload for a deserialization "
+                "sink), then "
                 "run_command to enumerate the host. Then call privesc_scan to get GTFOBins-"
                 "matched escalation candidates, pick one, run it with run_command, and confirm "
                 "root with `id` (uid=0). Reason beyond the candidates — kernel/cron/writable-path "
@@ -564,6 +608,9 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     stat = Agent(Scope(code_path=".", authorized_by="t", mode="static"), "x")
     assert "static mode" in stat.browse("http://127.0.0.1/")["error"]  # no browser in static
     assert "static mode" in stat.browser_action("http://127.0.0.1/", [{"find": "x"}])["error"]
+    assert dev.make_payload("pickle", "id").get("payload"), "pickle payload"
+    assert "unsupported" in dev.make_payload("java", "id").get("error", "")
+    assert "error" in stat.upload_shell("http://127.0.0.1/u", "http://127.0.0.1/up")  # gated
 
     assert dev.finish("rooted the box")["done"] is True and dev.done is True  # self-termination
     g = Agent(Scope(ips=["127.0.0.1"], authorized_by="t", mode="dev"), base)

