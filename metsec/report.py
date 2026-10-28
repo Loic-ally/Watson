@@ -11,6 +11,18 @@ from dataclasses import asdict
 from pathlib import Path
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+# A consistent CVSS band per severity (verified findings score at the top of the band).
+SEV_CVSS = {"critical": (9.0, 10.0), "high": (7.0, 8.9), "medium": (4.0, 6.9),
+            "low": (0.1, 3.9), "info": (0.0, 0.0)}
+
+
+def cvss(f) -> float:
+    lo, hi = SEV_CVSS.get(f.severity, (0.0, 0.0))
+    return round(hi if f.status == "verified" else (lo + hi) / 2, 1)
+
+
+def overall_score(findings: list) -> float:
+    return max((cvss(f) for f in findings), default=0.0)
 
 
 def _rank(f) -> tuple:
@@ -45,8 +57,11 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str
         f"- **Date:** {meta.get('date', '')}",
         *([f"- **Audit log:** {meta['audit']}"] if meta.get("audit") else []),
         f"- **Findings:** {len(findings)} ({badge})" if findings else "- **Findings:** 0",
+        f"- **Overall risk (CVSS):** {overall_score(findings)}",
         "", "---", "",
     ]
+    if meta.get("narrative"):
+        out += ["## Attack narrative", "", meta["narrative"], "", "---", ""]
     if hypotheses:
         out += ["## Hypotheses & attack chain", ""]
         for h in hypotheses:
@@ -59,6 +74,7 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str
         out += ["", "---", ""]
     for f in findings:
         out.append(f"## [{f.severity.upper()} · {f.status}] {f.title}")
+        out.append(f"- **CVSS:** {cvss(f)}")
         if f.affected:
             out.append(f"- **Where:** {f.affected}")
         if getattr(f, "exploitation", ""):
@@ -75,18 +91,78 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None) -> str
     return "\n".join(out)
 
 
-def write_reports(findings: list, meta: dict, out_dir: str,
-                  hypotheses: list | None = None) -> tuple[Path, Path]:
+def narrative(findings: list, hypotheses: list | None = None) -> str:
+    """LLM-written attack-chain narrative (one paragraph). Empty string on failure."""
+    from . import config
+
+    if not findings:
+        return ""
+    fs = "\n".join(f"- [{f.severity}/{f.status}] {f.title} @ {f.affected}" for f in findings[:20])
+    hy = "\n".join(f"- {h.statement}" for h in (hypotheses or [])[:10])
+    prompt = ("Write a concise one-paragraph attack-chain narrative for this authorized pentest: "
+              "how the findings connect from entry point to impact. Prose only.\n\n"
+              f"Findings:\n{fs}\n\nHypotheses:\n{hy}")
+    try:
+        return config.chat(prompt, model=config.FAST).strip()
+    except Exception:  # noqa: BLE001 — narrative is best-effort
+        return ""
+
+
+def _html(findings: list, meta: dict, hypotheses: list, narr: str) -> str:
+    import html as _h
+
+    def esc(s):
+        return _h.escape(str(s or ""))
+
+    color = {"critical": "#f87272", "high": "#fb7185", "medium": "#fbbd23",
+             "low": "#3b82f6", "info": "#6b7689"}
+    cards = []
+    for f in findings:
+        c = color.get(f.severity, "#6b7689")
+        rows = [f'<div class="r"><b>{lbl}:</b> {esc(val)}</div>' for lbl, val in (
+            ("Where", f.affected), ("How exploited", getattr(f, "exploitation", "")),
+            ("Evidence", f.evidence), ("Fix", f.remediation)) if val]
+        cards.append(f'<div class="f" style="border-left-color:{c}"><div class="hd">'
+                     f'<span class="sev" style="background:{c}">{esc(f.severity.upper())} · {esc(f.status)}</span>'
+                     f'<b>{esc(f.title)}</b><span class="cv">CVSS {cvss(f)}</span></div>'
+                     + "".join(rows) + "</div>")
+    hyps = "".join(f"<li>{esc(h.statement)} <i>({esc(h.status)})</i></li>" for h in hypotheses)
+    badge = " · ".join(f"{n} {s}" for s, n in summarize(findings).items())
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><title>MetSec Report</title><style>"
+        "body{background:#0b0e14;color:#c9d4e3;font:14px/1.6 ui-sans-serif,system-ui,sans-serif;"
+        "max-width:900px;margin:0 auto;padding:24px}h1{color:#36d399}h2{color:#8aa0bd;"
+        "border-bottom:1px solid #1f2633;padding-bottom:6px;margin-top:28px}.meta{color:#6b7689;font-size:13px}"
+        ".f{background:#121722;border-left:4px solid;border-radius:0 6px 6px 0;padding:12px 16px;margin:10px 0}"
+        ".hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.sev{color:#0b0e14;font-weight:700;"
+        "font-size:11px;padding:2px 8px;border-radius:4px}.cv{margin-left:auto;color:#6b7689;font-size:12px}"
+        ".r{font-size:13px;margin-top:6px;color:#aab6c6}.r b{color:#c9d4e3}.score{font-size:22px;color:#f87272;"
+        "font-weight:700}li{margin:4px 0}</style></head><body><h1>⬢ MetSec Report</h1>"
+        f"<p class='meta'>{esc(meta.get('target'))} · mode {esc(meta.get('mode'))} · exploitation "
+        f"{'on' if meta.get('exploit') else 'off'} · {esc(meta.get('date'))}<br>authorized by "
+        f"{esc(meta.get('authorized_by'))}</p>"
+        f"<p>Overall risk (CVSS): <span class='score'>{overall_score(findings)}</span> — "
+        f"{len(findings)} findings ({esc(badge)})</p>"
+        + (f"<h2>Attack narrative</h2><p>{esc(narr)}</p>" if narr else "")
+        + (f"<h2>Hypotheses &amp; attack chain</h2><ul>{hyps}</ul>" if hyps else "")
+        + "<h2>Findings</h2>" + ("".join(cards) if cards else "<p>No findings.</p>")
+        + "</body></html>")
+
+
+def write_reports(findings: list, meta: dict, out_dir: str, hypotheses: list | None = None,
+                  narrative: str = "") -> tuple[Path, Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     ranked = dedup_rank(findings)
+    meta = {**meta, "narrative": narrative, "overall_cvss": overall_score(ranked)}
     data = {"meta": meta, "summary": summarize(ranked),
-            "findings": [asdict(f) for f in ranked],
+            "findings": [{**asdict(f), "cvss": cvss(f)} for f in ranked],
             "hypotheses": [asdict(h) for h in (hypotheses or [])]}
-    jpath, mpath = out / "findings.json", out / "report.md"
+    jpath, mpath, hpath = out / "findings.json", out / "report.md", out / "report.html"
     jpath.write_text(json.dumps(data, indent=2))
     mpath.write_text(_markdown(ranked, meta, hypotheses or []))
-    return jpath, mpath
+    hpath.write_text(_html(ranked, meta, hypotheses or [], narrative))
+    return jpath, mpath, hpath
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
@@ -110,11 +186,14 @@ if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
                 "authorized_by": "owner", "date": "2026-10-27"}
         hyps = [Hypothesis("looted DB password may unlock the admin login",
                            ["Exposed .env", "admin login form"], "replay creds", "confirmed")]
-        j, m = write_reports(fs, meta, d, hypotheses=hyps)
+        j, m, h = write_reports(fs, meta, d, hypotheses=hyps, narrative="chained .env creds to admin")
         data = json.loads(j.read_text())
         assert len(data["findings"]) == 3 and data["meta"]["exploit"] is True
-        assert len(data["hypotheses"]) == 1 and data["hypotheses"][0]["status"] == "confirmed"
+        assert data["findings"][0]["cvss"] == 10.0 and data["meta"]["overall_cvss"] == 10.0
+        assert data["hypotheses"][0]["status"] == "confirmed"
         md = m.read_text()
-        assert "Exploitation:** enabled" in md and "Exposed .env" in md
+        assert "Exposed .env" in md and "CVSS:" in md and "Attack narrative" in md
         assert "Hypotheses & attack chain" in md and "looted DB password" in md
+        html = h.read_text()
+        assert "<html" in html and "Exposed .env" in html and "CVSS 10.0" in html
     print("report self-check ok")

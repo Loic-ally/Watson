@@ -187,7 +187,7 @@ def assess_cmd(args: list[str]) -> int:
     from datetime import datetime, timezone
 
     from .agent import assess
-    from .report import dedup_rank, write_reports
+    from .report import dedup_rank, narrative, write_reports
 
     if "--scope" not in args:
         print("usage: metsec assess [<url>] --scope <file> "
@@ -234,8 +234,9 @@ def assess_cmd(args: list[str]) -> int:
         meta = {"target": target or s.code_path, "mode": s.mode, "exploit": exploit,
                 "authorized_by": s.authorized_by, "audit": audit.path(),
                 "date": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        j, m = write_reports(findings, meta, out_dir, hypotheses=hyps)
-        print(f"\nwrote {j}  and  {m}")
+        j, m, h = write_reports(findings, meta, out_dir, hypotheses=hyps,
+                                narrative=narrative(findings, hyps))
+        print(f"\nwrote {j}\n      {m}\n      {h}")
     return 0
 
 
