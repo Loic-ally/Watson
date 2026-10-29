@@ -46,9 +46,12 @@ def _record(id, source, summary, products="", cvss=0.0, severity="",
             affected_ranges=None, fixed_versions=None, cwe_ids=None,
             attack_technique_ids=None, published="", modified="", applicability="",
             candidate=False, rtype="cve", provenance=""):
+    from .redact import redact
     references = references or [f"https://nvd.nist.gov/vuln/detail/{id}"]
     aliases = list(aliases or [])
     cwe_ids = list(cwe_ids or ([c.strip() for c in cwe.split(",") if c.strip()] if cwe else []))
+    # researched/web summaries can carry secrets → scrub before it is embedded or stored
+    summary = redact(summary or "")
     # embed id + aliases + products + summary so an exact alias query still retrieves it
     text = " ".join(filter(None, [id, " ".join(aliases), products, summary]))
     if isinstance(applicability, (dict, list)):

@@ -14,7 +14,7 @@ from urllib.parse import unquote
 
 import requests
 
-from . import audit, events
+from . import audit, events, redact
 from .scope import OutOfScope
 
 UA = {"User-Agent": "Mozilla/5.0 (MetSec agent)"}
@@ -724,12 +724,16 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
             rtext = json.dumps(agent.dispatch(tc.function.name, args), default=str)
             if "uid=0(root)" in rtext:  # root reached via ANY tool (http_probe, run_command, …)
                 events.emit("root")
-            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": rtext[:2000]})
+            # scrub secrets before the result (fetched pages, command output, loot) reaches
+            # the model — raw output stays only in the operator-local audit log
+            msgs.append({"role": "tool", "tool_call_id": tc.id,
+                         "content": redact.redact(rtext[:2000])})
         return True
 
     mem = inventory.get("_memory", "") if isinstance(inventory, dict) else ""
     inv_dump = {k: v for k, v in inventory.items() if k != "_memory"} if isinstance(inventory, dict) else inventory
-    user = (f"Recon inventory for {agent.target}:\n" + json.dumps(_select_inventory(inv_dump), default=str)
+    user = (f"Recon inventory for {agent.target}:\n"
+            + redact.redact(json.dumps(_select_inventory(inv_dump), default=str))
             + "\n\nInvestigate with the tools and record grounded findings. Stop when done.")
     if mem:
         user = mem + "\n\n" + user
