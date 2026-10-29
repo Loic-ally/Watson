@@ -799,6 +799,22 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
     audit.log("start", target=target, mode=scope.mode, exploit=exploit, project=project)
     # cache key carries project + asset (scheme/host/PORT) so runs of different projects or of
     # apps on different ports never share a recon inventory
+    # Log in ONCE per scan and reuse the session for both recon and the agent — two rapid
+    # logins (recon's authenticated crawl + the agent) otherwise double the work and trip the
+    # provider's auth rate-limit. The live session is needed every run even when recon is cached.
+    authed_session = None
+    if scope.mode != "static" and scope.auth:
+        from . import auth as _auth
+        try:
+            authed_session = _auth.login(scope)
+            acct = (scope.auth.get("accounts") or [{}])[0]
+            events.emit("tool", name="auth",
+                        detail=f"logged in as {acct.get('role', 'user')} test account")
+            audit.log("auth", role=acct.get("role", "user"), login_url=scope.auth.get("login_url"),
+                      accounts=len(scope.auth.get("accounts") or []))
+        except OutOfScope as e:
+            events.emit("error", msg=f"authentication failed: {e}")
+
     ckey = (project, memory.asset_id(target), scope.mode, active)
     inv = None if fresh else cache.get(ckey)
     if inv is None:
@@ -810,27 +826,19 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
             raw = recon(target, scope)
             if active:
                 from .active import active_recon
-                raw.update(active_recon(target, scope))
+                raw.update(active_recon(target, scope, session=authed_session))
         inv = _inventory_json(raw)
         cache.put(inv, ckey)
     note = memory.context(target, project)
     if note:
         inv = {**inv, "_memory": note}
     agent = Agent(scope, target, budget, exploit=exploit)
-    if scope.mode != "static" and scope.auth:   # log in so the agent's probes are authenticated
-        from . import auth as _auth
-        try:
-            agent.session = _auth.login(scope)   # session cookies now ride every http_probe
-            agent.auth_storage = getattr(agent.session, "browser_storage", [])  # for vision browser
-            agent.auth_state = getattr(agent.session, "browser_state", None)    # cookies+localStorage
-            agent.authed = True
-            acct = (scope.auth.get("accounts") or [{}])[0]
-            agent.auth_role = acct.get("role", "user")
-            events.emit("tool", name="auth", detail=f"logged in as {agent.auth_role} test account")
-            audit.log("auth", role=agent.auth_role, login_url=scope.auth.get("login_url"),
-                      accounts=len(scope.auth.get("accounts") or []))
-        except OutOfScope as e:
-            events.emit("error", msg=f"authentication failed: {e}")
+    if authed_session is not None:
+        agent.session = authed_session       # session rides every http_probe
+        agent.auth_storage = getattr(authed_session, "browser_storage", [])  # vision browser
+        agent.auth_state = getattr(authed_session, "browser_state", None)    # cookies+localStorage
+        agent.authed = True
+        agent.auth_role = (scope.auth.get("accounts") or [{}])[0].get("role", "user")
     run_agent(agent, inv)
     if revalidate:
         from .revalidate import revalidate as _reval

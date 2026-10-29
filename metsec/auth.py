@@ -199,13 +199,28 @@ def login_browser(scope, account: dict | None = None) -> requests.Session:
         try:
             ctx = browser.new_context()
             page = ctx.new_page()
+            auth_calls: list[int] = []   # statuses of login/token API calls, for diagnostics
+            page.on("response", lambda r: auth_calls.append(r.status)
+                    if re.search(r"/auth/v1/token|/login|/signin|/session", r.url, re.I)
+                    and r.request.method == "POST" else None)
             page.goto(login_url, timeout=25000, wait_until="domcontentloaded")
+            # wait for the SPA to hydrate: the password field must be present AND React must
+            # have attached its handlers, else a submit before hydration is a silent no-op
             try:
-                page.fill(user_sel, user, timeout=10000)
-                page.fill(pass_sel, pw, timeout=10000)
+                page.wait_for_selector(pass_sel, state="visible", timeout=15000)
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:  # noqa: BLE001 — best-effort; fills below still auto-wait
+                pass
+            try:
+                # type into the fields (triggers React onChange reliably), not just set .value
+                page.fill(user_sel, "", timeout=10000)
+                page.type(user_sel, user, delay=15)
+                page.fill(pass_sel, "", timeout=10000)
+                page.type(pass_sel, pw, delay=15)
             except Exception as e:  # noqa: BLE001 — form not where we expect
                 raise OutOfScope(f"could not fill the login form ({str(e)[:80]}) — set "
                                  "user_selector/pass_selector in scope.auth") from e
+            page.wait_for_timeout(300)   # let React commit the input state before submit
             if submit_sel:
                 page.click(submit_sel, timeout=10000)
             else:
@@ -224,6 +239,7 @@ def login_browser(scope, account: dict | None = None) -> requests.Session:
             page.wait_for_timeout(1000)   # let a client-side login settle its storage
             state = ctx.storage_state()
             final_url = page.url
+            statuses = list(auth_calls)
         finally:
             browser.close()
 
@@ -236,11 +252,16 @@ def login_browser(scope, account: dict | None = None) -> requests.Session:
     auth_cookie = any(_AUTH_COOKIE.search(c.get("name", "")) for c in cookies)
     ok = bool((success_url and success_url in final_url) or moved or token_ls or auth_cookie)
     if not ok:
+        why = ""
+        if 429 in statuses:
+            why = " — the auth API returned 429 (rate-limited); wait a few minutes and retry"
+        elif any(400 <= s < 500 for s in statuses):
+            why = f" — the auth API rejected the login (HTTP {statuses}); check the credentials"
+        elif not statuses:
+            why = " — no login API call was observed; the form selectors may be wrong"
         raise OutOfScope("browser login did not appear to succeed (still on the login page, no "
-                         "session cookie/token). Likely a rejected login — wrong credentials, an "
-                         "auth rate-limit (wait a minute and retry), or a form the heuristics "
-                         "missed (set user_selector/pass_selector/submit_selector/success_url "
-                         "in scope.auth).")
+                         "session cookie/token)" + why + ". Override user_selector/pass_selector/"
+                         "submit_selector/success_url in scope.auth if the form was missed.")
 
     sess = requests.Session()
     for c in cookies:   # same-origin app routes are now authenticated via these cookies

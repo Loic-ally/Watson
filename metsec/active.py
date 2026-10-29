@@ -236,8 +236,11 @@ def nuclei_scan(target: str, timeout: int = 900) -> list[dict]:
 
 
 def active_recon(target: str, scope, ports: bool = False, nuclei: bool = False,
-                 rate: float = 0.0, max_pages: int = 50, wordlist: str | None = None) -> dict:
-    """Mode-gated active recon. static refuses; prod throttles; dev is aggressive."""
+                 rate: float = 0.0, max_pages: int = 50, wordlist: str | None = None,
+                 session=None) -> dict:
+    """Mode-gated active recon. static refuses; prod throttles; dev is aggressive.
+
+    `session` is an already-authenticated session to crawl with (avoids a second login)."""
     from .scope import OutOfScope
 
     if scope.mode == "static":
@@ -247,7 +250,9 @@ def active_recon(target: str, scope, ports: bool = False, nuclei: bool = False,
         rate = 0.3  # detection-first throttle in prod
 
     out: dict = {}
-    if scope.auth:  # authenticated surface when creds are configured
+    if session is not None:                 # reuse the scan's authenticated session
+        out["crawl"] = crawl(target, scope, max_pages=max_pages, rate=rate, session=session)
+    elif scope.auth:  # authenticated surface when creds are configured
         from .auth import authenticated_crawl
         out["crawl"] = authenticated_crawl(scope, target, max_pages=max_pages, rate=rate)
     else:
