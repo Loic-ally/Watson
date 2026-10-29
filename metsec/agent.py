@@ -132,6 +132,7 @@ class Agent:
         self.authed = False  # an authenticated session is loaded (self.session carries it)
         self.auth_role = ""  # the role of the logged-in test account
         self.auth_storage = []  # localStorage to seed the vision browser (SPA session token)
+        self.auth_state = None  # full Playwright storage_state (cookies+localStorage) to restore
         self._calls: dict = {}  # repeat guard
         self.observations: list[Observation] = []  # evidence the agent actually collected
         self._obs_by_id: dict[str, Observation] = {}
@@ -371,7 +372,7 @@ class Agent:
         self.scope.require(url)
         try:
             from .browser import snapshot, vision_analyze
-            snap = snapshot(url, storage=self.auth_storage)
+            snap = snapshot(url, storage=self.auth_storage, storage_state=self.auth_state)
         except ImportError:
             return {"error": "browser needs: pip install playwright && playwright install chromium"}
         except Exception as e:  # noqa: BLE001 — navigation can fail many ways
@@ -393,7 +394,7 @@ class Agent:
             return {"error": "steps must be a non-empty list of {find, fill?}"}
         try:
             from .browser import interact
-            res = interact(url, steps, storage=self.auth_storage)
+            res = interact(url, steps, storage=self.auth_storage, storage_state=self.auth_state)
         except ImportError:
             return {"error": "browser needs: pip install playwright && playwright install chromium"}
         except Exception as e:  # noqa: BLE001
@@ -821,6 +822,7 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
         try:
             agent.session = _auth.login(scope)   # session cookies now ride every http_probe
             agent.auth_storage = getattr(agent.session, "browser_storage", [])  # for vision browser
+            agent.auth_state = getattr(agent.session, "browser_state", None)    # cookies+localStorage
             agent.authed = True
             acct = (scope.auth.get("accounts") or [{}])[0]
             agent.auth_role = acct.get("role", "user")

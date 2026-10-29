@@ -12,11 +12,19 @@ import json
 import re
 
 
-def _ctx(browser, storage, viewport=None):
-    """A browser context that pre-seeds localStorage (for an authenticated session) so the
-    app's JS sees the token before it runs. `storage` is [{name, value}] or None."""
-    ctx = browser.new_context(viewport=viewport) if viewport else browser.new_context()
-    if storage:
+def _ctx(browser, storage=None, storage_state=None, viewport=None):
+    """A browser context that restores an authenticated session so the app renders logged-in.
+
+    `storage_state` is a full Playwright state dict (cookies + localStorage) — the robust path
+    (handles cookie-based SSR sessions). `storage` is a plain [{name, value}] localStorage list
+    seeded via an init script (used when only a token is known). Either may be None."""
+    kw = {}
+    if viewport:
+        kw["viewport"] = viewport
+    if storage_state:
+        kw["storage_state"] = storage_state
+    ctx = browser.new_context(**kw)
+    if storage and not storage_state:
         items = {s["name"]: s["value"] for s in storage if s.get("name")}
         ctx.add_init_script(
             "(()=>{try{const m=" + json.dumps(items)
@@ -33,16 +41,17 @@ _FORMS_JS = """els => els.map(f => ({
 }))"""
 
 
-def snapshot(url: str, timeout: int = 20000, storage: list | None = None) -> dict:
+def snapshot(url: str, timeout: int = 20000, storage: list | None = None,
+             storage_state: dict | None = None) -> dict:
     """Navigate headless Chromium → {png, title, links, forms, text}.
 
-    `storage` pre-seeds localStorage so an authenticated SPA renders its logged-in state."""
+    `storage`/`storage_state` restore an authenticated session so the SPA renders logged-in."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         try:
-            page = _ctx(browser, storage).new_page()
+            page = _ctx(browser, storage, storage_state).new_page()
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             try:
                 page.wait_for_load_state("networkidle", timeout=4000)
@@ -115,12 +124,13 @@ _CLICK_JS = """([x, y]) => {
 }"""
 
 
-def interact(url: str, steps: list[dict], timeout: int = 20000, storage: list | None = None) -> dict:
+def interact(url: str, steps: list[dict], timeout: int = 20000, storage: list | None = None,
+             storage_state: dict | None = None) -> dict:
     """Drive the page by VISION: SAM locates each element, Playwright clicks/fills it.
 
     steps: [{"find": "<noun phrase>", "fill": "<text>"?}] — fill present ⇒ type into it,
-    else click. Viewport is fixed so SAM coordinates map 1:1 to clicks. `storage` pre-seeds
-    localStorage for an authenticated session.
+    else click. Viewport is fixed so SAM coordinates map 1:1 to clicks. `storage`/`storage_state`
+    restore an authenticated session.
     """
     from playwright.sync_api import sync_playwright
 
@@ -128,7 +138,8 @@ def interact(url: str, steps: list[dict], timeout: int = 20000, storage: list | 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         try:
-            page = _ctx(browser, storage, viewport={"width": 1280, "height": 720}).new_page()
+            page = _ctx(browser, storage, storage_state,
+                        viewport={"width": 1280, "height": 720}).new_page()
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             for st in steps:
                 boxes = segment(page.screenshot(), st["find"])

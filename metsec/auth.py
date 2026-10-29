@@ -8,6 +8,7 @@ control) in later phases.
 from __future__ import annotations
 
 import os
+import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -74,10 +75,17 @@ def _cred(env_name: str) -> str:
 def login(scope, account: dict | None = None) -> requests.Session:
     """Log in a test account from scope.auth → authenticated requests.Session.
 
-    Dispatches on scope.auth['type']: 'form' (default — HTML form POST + cookie session) or
-    'token'/'bearer'/'supabase' (JSON login → JWT sent as Authorization: Bearer on every
-    request, e.g. Supabase GoTrue)."""
+    Dispatches on scope.auth['type']:
+      'form'   (default) — HTML form POST + cookie session (static recon, no JS);
+      'token'/'bearer'/'supabase'/'jwt' — JSON login → JWT sent as Authorization: Bearer;
+      'browser' — drive the REAL login form in Playwright with the creds from .env, capture
+                  the full storage_state (cookies + localStorage), and reuse it everywhere.
+                  The universal path for any SPA — no need to reverse-engineer its auth API,
+                  and the password is typed by this code, never placed in the model's context.
+    """
     kind = (scope.auth or {}).get("type", "form").lower()
+    if kind == "browser":
+        return login_browser(scope, account)
     if kind in ("token", "bearer", "supabase", "jwt"):
         return login_token(scope, account)
     return login_form(scope, account)
@@ -144,6 +152,155 @@ def login_token(scope, account: dict | None = None) -> requests.Session:
     if ref:
         sess.browser_storage = [{"name": f"sb-{ref}-auth-token", "value": _json.dumps(data)}]
     return sess
+
+
+# default selectors for the real login form (overridable via scope.auth)
+_USER_SEL = ("input[type=email], input[name=email], input[name=username], input[name=user], "
+             "input[type=text]")
+_PASS_SEL = "input[type=password]"
+_SUBMIT_SELS = ("button[type=submit]", "input[type=submit]")
+_AUTH_COOKIE = re.compile(r"sess|auth|sb-|token|jwt|\bsid\b|csrf", re.I)
+
+
+def login_browser(scope, account: dict | None = None) -> requests.Session:
+    """Drive the REAL login form in Playwright with creds from .env, then reuse the session.
+
+    Types the credentials into the live form (this code types them — they never enter the
+    model's context), submits, captures the full storage_state (cookies + localStorage), and
+    returns a requests.Session carrying the cookies (plus a bearer lifted from localStorage
+    when present) with .browser_storage set so the vision browser renders the logged-in app.
+    Works for any SPA without knowing its auth API. Selectors/success checks are overridable
+    via scope.auth: user_selector, pass_selector, submit_selector, success_url."""
+    import json as _json
+
+    auth = scope.auth or {}
+    accounts = auth.get("accounts") or []
+    login_url = auth.get("login_url")
+    if not accounts or not login_url:
+        raise OutOfScope("browser auth needs login_url and at least one account")
+    if scope.mode == "static":
+        raise OutOfScope("browser login needs network/JS — not available in static mode")
+    scope.require(login_url)
+    acct = account or accounts[0]
+    user, pw = _cred(acct["user_env"]), _cred(acct["pass_env"])
+    user_sel = auth.get("user_selector") or _USER_SEL
+    pass_sel = auth.get("pass_selector") or _PASS_SEL
+    submit_sel = auth.get("submit_selector")
+    success_url = auth.get("success_url")
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        raise OutOfScope("browser login needs: pip install playwright && playwright install "
+                         "chromium") from e
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        try:
+            ctx = browser.new_context()
+            page = ctx.new_page()
+            page.goto(login_url, timeout=25000, wait_until="domcontentloaded")
+            try:
+                page.fill(user_sel, user, timeout=10000)
+                page.fill(pass_sel, pw, timeout=10000)
+            except Exception as e:  # noqa: BLE001 — form not where we expect
+                raise OutOfScope(f"could not fill the login form ({str(e)[:80]}) — set "
+                                 "user_selector/pass_selector in scope.auth") from e
+            if submit_sel:
+                page.click(submit_sel, timeout=10000)
+            else:
+                if not any(_try_click(page, s) for s in _SUBMIT_SELS):
+                    page.press(pass_sel, "Enter")   # fall back to submitting via Enter
+            # wait for the login to actually complete: the URL leaves the login page
+            try:
+                page.wait_for_url(lambda u: not re.search(r"log[_-]?in|sign[_-]?in", u, re.I),
+                                  timeout=12000)
+            except Exception:  # noqa: BLE001 — SPA may stay on the same URL; fall through
+                pass
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:  # noqa: BLE001 — networkidle best-effort
+                pass
+            page.wait_for_timeout(1000)   # let a client-side login settle its storage
+            state = ctx.storage_state()
+            final_url = page.url
+        finally:
+            browser.close()
+
+    cookies = state.get("cookies", [])
+    ls = [{"name": i["name"], "value": i["value"]}
+          for o in state.get("origins", []) for i in o.get("localStorage", [])]
+    moved = final_url.rstrip("/") != login_url.rstrip("/") and not re.search(
+        r"log[_-]?in|sign[_-]?in", final_url, re.I)
+    token_ls = any(("access_token" in i["value"] or _AUTH_COOKIE.search(i["name"])) for i in ls)
+    auth_cookie = any(_AUTH_COOKIE.search(c.get("name", "")) for c in cookies)
+    ok = bool((success_url and success_url in final_url) or moved or token_ls or auth_cookie)
+    if not ok:
+        raise OutOfScope("browser login did not appear to succeed (still on the login page, no "
+                         "session cookie/token). Likely a rejected login — wrong credentials, an "
+                         "auth rate-limit (wait a minute and retry), or a form the heuristics "
+                         "missed (set user_selector/pass_selector/submit_selector/success_url "
+                         "in scope.auth).")
+
+    sess = requests.Session()
+    for c in cookies:   # same-origin app routes are now authenticated via these cookies
+        try:
+            sess.cookies.set(c["name"], c["value"], domain=c.get("domain"),
+                             path=c.get("path", "/"))
+        except Exception:  # noqa: BLE001 — skip a cookie requests can't represent
+            pass
+    # Lift a bearer out of the captured session (cookie or localStorage) so CROSS-ORIGIN API
+    # probes (e.g. Supabase REST) are authenticated too — same-domain cookies don't reach them.
+    if (tok := _extract_bearer(cookies, ls)):
+        sess.headers["Authorization"] = f"Bearer {tok}"
+    if (apikey := _apikey(auth)):
+        sess.headers["apikey"] = apikey
+    sess.browser_storage = ls      # legacy localStorage-only seed
+    sess.browser_state = state     # full state (cookies+localStorage) → authenticated vision browser
+    return sess
+
+
+def _try_click(page, selector: str) -> bool:
+    try:
+        page.click(selector, timeout=3000)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _extract_bearer(cookies: list, localstorage: list) -> str | None:
+    """Find an access_token in a captured session. Handles Supabase's cookie/localStorage
+    formats, incl. the @supabase/ssr `base64-<b64 json>` value and chunked/array shapes.
+    Secrets are returned for in-process use only — never logged or printed."""
+    import base64
+    import json
+
+    raws = [c.get("value", "") for c in cookies
+            if "auth-token" in c.get("name", "") or c.get("name", "").startswith("sb-")]
+    raws += [c.get("value", "") for c in cookies if c.get("value", "") not in raws]
+    raws += [i.get("value", "") for i in localstorage]
+    for raw in raws:
+        if not isinstance(raw, str) or not raw:
+            continue
+        val = raw
+        if val.startswith("base64-"):
+            for dec in (base64.b64decode, base64.urlsafe_b64decode):
+                try:
+                    val = dec(val[7:] + "===").decode("utf-8", "ignore")
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+        try:
+            data = json.loads(val)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, list) and data:          # chunked/array session
+            data = data[0] if isinstance(data[0], dict) else {}
+        if isinstance(data, dict):
+            tok = data.get("access_token") or (data.get("currentSession") or {}).get("access_token")
+            if tok:
+                return tok
+    return None
 
 
 def login_form(scope, account: dict | None = None) -> requests.Session:
@@ -276,4 +433,59 @@ if __name__ == "__main__":  # self-check: python -m metsec.auth (in-process logi
     except OutOfScope:
         pass
     tsrv.shutdown()
+
+    # --- browser login: drive the real form in Playwright, reuse cookies in requests ---
+    os.environ["BU"], os.environ["BP"] = "carol@example.com", "pw9"
+    LOGINPAGE = (b'<html><body><form method="post" action="/login">'
+                 b'<input type="email" name="email"><input type="password" name="pw">'
+                 b'<button type="submit">Log in</button></form></body></html>')
+
+    class BH(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/app":
+                ok = "sid=ok" in self.headers.get("Cookie", "")
+                body, code = (b"DASHBOARD" if ok else b"login required"), (200 if ok else 302)
+            else:
+                body, code = LOGINPAGE, 200
+            self.send_response(code)
+            if code == 302:
+                self.send_header("Location", "/login")
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(n).decode()
+            ok = "email=carol%40example.com" in body and "pw=pw9" in body
+            self.send_response(302)
+            if ok:
+                self.send_header("Set-Cookie", "sid=ok; Path=/")
+            self.send_header("Location", "/app" if ok else "/login")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    try:
+        from playwright.sync_api import sync_playwright as _sp  # noqa: F401
+        _have_pw = True
+    except ImportError:
+        _have_pw = False
+    if _have_pw:
+        bsrv = HTTPServer(("127.0.0.1", 0), BH)
+        bport = bsrv.server_address[1]
+        threading.Thread(target=bsrv.serve_forever, daemon=True).start()
+        bbase = f"http://127.0.0.1:{bport}"
+        bscope = Scope(ips=["127.0.0.1"], authorized_by="test", mode="dev",
+                       auth={"type": "browser", "login_url": f"{bbase}/login",
+                             "accounts": [{"user_env": "BU", "pass_env": "BP"}]})
+        bsess = login_browser(bscope)
+        # the cookie captured in Chromium now rides the requests session
+        assert bsess.get(f"{bbase}/app").text == "DASHBOARD", "browser-login cookie not reused"
+        bsrv.shutdown()
+        print("  browser-login path ok")
+    else:
+        print("  browser-login path skipped (playwright not installed)")
+
     print("auth self-check ok")
