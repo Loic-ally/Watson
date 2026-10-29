@@ -207,18 +207,20 @@ class CveIndex:
         return len(records)
 
     def sync(self, records: Iterable[dict]) -> int:
-        """Idempotent incremental ingest: a record already present (same id) is REPLACED,
-        not duplicated — re-running research never piles up copies. This is distinct from
-        build(), which reconstructs the whole index."""
+        """Idempotent incremental ingest keyed by (id, source): re-ingesting the SAME id from
+        the SAME source REPLACES that row (no duplicate pile-up), but a different source's row
+        for the same id is PRESERVED — so distinct source contributions and their
+        contradictions are kept. Distinct from build(), which reconstructs the whole index."""
         records = list(records)
         if not records:
             return 0
         tbl = self.db.open_table(TABLE)
         self._check_schema(tbl)
-        ids = sorted({r["id"] for r in records if r.get("id")})
-        if ids:
-            quoted = ",".join("'" + i.replace("'", "''") + "'" for i in ids)
-            tbl.delete(f"id IN ({quoted})")   # drop prior copies → idempotent upsert
+        esc = lambda s: str(s).replace("'", "''")  # noqa: E731
+        pairs = {(r["id"], r.get("source", "")) for r in records if r.get("id")}
+        if pairs:
+            clause = " OR ".join(f"(id = '{esc(i)}' AND source = '{esc(s)}')" for i, s in pairs)
+            tbl.delete(clause)                # idempotent per (id, source), cross-source kept
         tbl.add(self._rows(records))
         return len(records)
 
