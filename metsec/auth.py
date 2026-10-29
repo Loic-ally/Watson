@@ -72,7 +72,75 @@ def _cred(env_name: str) -> str:
 
 
 def login(scope, account: dict | None = None) -> requests.Session:
-    """Log in a test account from scope.auth → authenticated requests.Session."""
+    """Log in a test account from scope.auth → authenticated requests.Session.
+
+    Dispatches on scope.auth['type']: 'form' (default — HTML form POST + cookie session) or
+    'token'/'bearer'/'supabase' (JSON login → JWT sent as Authorization: Bearer on every
+    request, e.g. Supabase GoTrue)."""
+    kind = (scope.auth or {}).get("type", "form").lower()
+    if kind in ("token", "bearer", "supabase", "jwt"):
+        return login_token(scope, account)
+    return login_form(scope, account)
+
+
+def _token_url(auth: dict) -> str | None:
+    if auth.get("token_url"):
+        return auth["token_url"]
+    if auth.get("supabase_url"):   # shorthand: derive the GoTrue password-grant endpoint
+        return auth["supabase_url"].rstrip("/") + "/auth/v1/token?grant_type=password"
+    return None
+
+
+def _apikey(auth: dict) -> str:
+    return (os.environ.get(auth["apikey_env"], "") if auth.get("apikey_env")
+            else auth.get("apikey", ""))
+
+
+def login_token(scope, account: dict | None = None) -> requests.Session:
+    """JSON credential login → bearer-token session (Supabase GoTrue and similar).
+
+    Posts {email, password} to the token endpoint (with the public apikey header when given),
+    reads the access token, and returns a Session that sends `Authorization: Bearer <jwt>`
+    (+ apikey) on every subsequent request — so the agent's probes are authenticated."""
+    import json as _json
+
+    auth = scope.auth or {}
+    accounts = auth.get("accounts") or []
+    token_url = _token_url(auth)
+    if not accounts or not token_url:
+        raise OutOfScope("token auth needs token_url (or supabase_url) and at least one account")
+    scope.require(token_url)   # the token endpoint must itself be in scope
+    acct = account or accounts[0]
+    user, pw = _cred(acct["user_env"]), _cred(acct["pass_env"])
+    apikey = _apikey(auth)
+
+    sess = requests.Session()
+    headers = {**UA, "Content-Type": "application/json"}
+    if apikey:
+        headers["apikey"] = apikey
+    body = {auth.get("user_field", "email"): user, auth.get("pass_field", "password"): pw}
+    try:
+        r = sess.post(token_url, data=_json.dumps(body), headers=headers, timeout=20)
+    except requests.RequestException as e:
+        raise OutOfScope(f"token login request failed: {str(e)[:120]}") from e
+    if r.status_code != 200:
+        raise OutOfScope(f"token login rejected ({r.status_code}) — check credentials/apikey")
+    try:
+        data = r.json()
+    except ValueError as e:
+        raise OutOfScope("token login response was not JSON") from e
+    token = (data.get(auth.get("token_field", "access_token"))
+             or data.get("token") or data.get("jwt") or data.get("id_token"))
+    if not token:
+        raise OutOfScope("no access token in the login response")
+    sess.headers.update({"Authorization": f"Bearer {token}"})   # rides every request
+    if apikey:
+        sess.headers["apikey"] = apikey
+    return sess
+
+
+def login_form(scope, account: dict | None = None) -> requests.Session:
+    """Log in a test account via an HTML form → cookie-session requests.Session."""
     auth = scope.auth or {}
     accounts = auth.get("accounts") or []
     login_url = auth.get("login_url")
@@ -152,4 +220,53 @@ if __name__ == "__main__":  # self-check: python -m metsec.auth (in-process logi
     out = authenticated_crawl(scope, f"{base}/")
     assert f"{base}/secret" in out["endpoints"], out["endpoints"]
     srv.shutdown()
+
+    # --- token/bearer login (Supabase-style): JSON creds → JWT → Authorization: Bearer ---
+    import json as _json
+
+    os.environ["TK_USER"], os.environ["TK_PASS"] = "bob@example.com", "pw"
+
+    class TH(BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            body = _json.loads(self.rfile.read(n).decode() or "{}")
+            ok = (self.path.startswith("/auth/v1/token")
+                  and body.get("email") == "bob@example.com" and body.get("password") == "pw"
+                  and self.headers.get("apikey") == "anon-key-123")
+            self.send_response(200 if ok else 400)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(_json.dumps({"access_token": "good-jwt"} if ok
+                                         else {"error": "bad"}).encode())
+
+        def do_GET(self):  # a protected API resource: needs the bearer token
+            bearer = self.headers.get("Authorization") == "Bearer good-jwt"
+            self.send_response(200 if bearer else 401)
+            self.end_headers()
+            self.wfile.write(b"PRIVATE ROWS" if bearer else b"no")
+
+        def log_message(self, *a):
+            pass
+
+    tsrv = HTTPServer(("127.0.0.1", 0), TH)
+    tport = tsrv.server_address[1]
+    threading.Thread(target=tsrv.serve_forever, daemon=True).start()
+    tbase = f"http://127.0.0.1:{tport}"
+    tscope = Scope(ips=["127.0.0.1"], authorized_by="test", mode="dev",
+                   auth={"type": "supabase", "supabase_url": tbase, "apikey": "anon-key-123",
+                         "accounts": [{"user_env": "TK_USER", "pass_env": "TK_PASS"}]})
+    tsess = login(tscope)
+    assert tsess.headers.get("Authorization") == "Bearer good-jwt"
+    assert tsess.headers.get("apikey") == "anon-key-123"
+    assert tsess.get(f"{tbase}/rest/v1/notes").text == "PRIVATE ROWS"  # bearer rides the request
+    # wrong apikey / creds are rejected, not silently accepted
+    bad = Scope(ips=["127.0.0.1"], authorized_by="t", mode="dev",
+                auth={"type": "supabase", "supabase_url": tbase, "apikey": "WRONG",
+                      "accounts": [{"user_env": "TK_USER", "pass_env": "TK_PASS"}]})
+    try:
+        login(bad)
+        raise AssertionError("bad apikey should be rejected")
+    except OutOfScope:
+        pass
+    tsrv.shutdown()
     print("auth self-check ok")
