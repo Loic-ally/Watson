@@ -136,6 +136,13 @@ def login_token(scope, account: dict | None = None) -> requests.Session:
     sess.headers.update({"Authorization": f"Bearer {token}"})   # rides every request
     if apikey:
         sess.headers["apikey"] = apikey
+    # Also expose the session for the VISION browser: Supabase-js keeps the session in
+    # localStorage under sb-<ref>-auth-token, so injecting it makes headless Chromium render
+    # the authenticated app (http_probe already carries the bearer header).
+    from urllib.parse import urlparse as _up
+    ref = (_up(token_url).hostname or "").split(".")[0]
+    if ref:
+        sess.browser_storage = [{"name": f"sb-{ref}-auth-token", "value": _json.dumps(data)}]
     return sess
 
 

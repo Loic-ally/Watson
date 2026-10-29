@@ -8,7 +8,20 @@ Optional: needs `pip install playwright && playwright install chromium`.
 from __future__ import annotations
 
 import base64
+import json
 import re
+
+
+def _ctx(browser, storage, viewport=None):
+    """A browser context that pre-seeds localStorage (for an authenticated session) so the
+    app's JS sees the token before it runs. `storage` is [{name, value}] or None."""
+    ctx = browser.new_context(viewport=viewport) if viewport else browser.new_context()
+    if storage:
+        items = {s["name"]: s["value"] for s in storage if s.get("name")}
+        ctx.add_init_script(
+            "(()=>{try{const m=" + json.dumps(items)
+            + ";for(const k in m)localStorage.setItem(k,m[k]);}catch(e){}})()")
+    return ctx
 
 # SAM 3.1 encodes each detection as <|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..|> + a mask.
 _BOX = re.compile(r"<\|box;x1=(\d+);y1=(\d+);x2=(\d+);y2=(\d+);w=(\d+);h=(\d+)\|>")
@@ -20,14 +33,16 @@ _FORMS_JS = """els => els.map(f => ({
 }))"""
 
 
-def snapshot(url: str, timeout: int = 20000) -> dict:
-    """Navigate headless Chromium → {png, title, links, forms, text}."""
+def snapshot(url: str, timeout: int = 20000, storage: list | None = None) -> dict:
+    """Navigate headless Chromium → {png, title, links, forms, text}.
+
+    `storage` pre-seeds localStorage so an authenticated SPA renders its logged-in state."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         try:
-            page = browser.new_page()
+            page = _ctx(browser, storage).new_page()
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             try:
                 page.wait_for_load_state("networkidle", timeout=4000)
@@ -100,11 +115,12 @@ _CLICK_JS = """([x, y]) => {
 }"""
 
 
-def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
+def interact(url: str, steps: list[dict], timeout: int = 20000, storage: list | None = None) -> dict:
     """Drive the page by VISION: SAM locates each element, Playwright clicks/fills it.
 
     steps: [{"find": "<noun phrase>", "fill": "<text>"?}] — fill present ⇒ type into it,
-    else click. Viewport is fixed so SAM coordinates map 1:1 to clicks.
+    else click. Viewport is fixed so SAM coordinates map 1:1 to clicks. `storage` pre-seeds
+    localStorage for an authenticated session.
     """
     from playwright.sync_api import sync_playwright
 
@@ -112,7 +128,7 @@ def interact(url: str, steps: list[dict], timeout: int = 20000) -> dict:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         try:
-            page = browser.new_page(viewport={"width": 1280, "height": 720})
+            page = _ctx(browser, storage, viewport={"width": 1280, "height": 720}).new_page()
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             for st in steps:
                 boxes = segment(page.screenshot(), st["find"])
@@ -153,7 +169,9 @@ if __name__ == "__main__":  # self-check: python -m metsec.browser (local page, 
     HTML = (b"<html><head><title>Login</title></head><body><h1>Portal</h1>"
             b'<form action="/auth" method="post"><input name="user">'
             b'<input name="pw" type="password"></form>'
-            b'<a href="/admin">admin</a></body></html>')
+            b'<a href="/admin">admin</a>'
+            b"<script>window.onload=()=>{document.body.innerHTML+=' AUTH:'"
+            b"+(localStorage.getItem('sb')||'none')}</script></body></html>")
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -172,6 +190,12 @@ if __name__ == "__main__":  # self-check: python -m metsec.browser (local page, 
     assert snap["title"] == "Login"
     assert any(f["inputs"] and f["inputs"][-1]["type"] == "password" for f in snap["forms"]), snap["forms"]
     assert any(l.endswith("/admin") for l in snap["links"]), snap["links"]
+    assert "AUTH:none" in snap["text"], snap["text"][-80:]       # no session injected
+
+    # authenticated browse: localStorage is seeded before the app's JS runs
+    base = f"http://127.0.0.1:{srv.server_address[1]}/"
+    snap2 = snapshot(base, storage=[{"name": "sb", "value": "TOKEN123"}])
+    assert "AUTH:TOKEN123" in snap2["text"], snap2["text"][-80:]
     srv.shutdown()
 
     # SAM box parsing (real output shape)
