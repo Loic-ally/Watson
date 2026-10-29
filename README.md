@@ -39,10 +39,14 @@ kind is given. If you do not agree, do not use MetSec.
 
 - **Reasoning + vision + fast** → Muse **Spark 1.3 Contributor** (`config.BRAIN`/`FAST`).
 - **Segmentation** → **SAM 3.1** — locates UI elements for vision-guided interaction.
-- **Knowledge base:** CVEs (CISA KEV / NVD / OSV) · **ExploitDB** exploit availability ·
-  **GTFOBins** (Linux privesc) · **LOLBAS** (Windows) · **MITRE ATT&CK** · **Wappalyzer**
-  (7.6k signatures) · live web research (DuckDuckGo / Tavily / Brave) — and the agent
-  reasons **beyond** the docs (it cracks custom, non-CVE flaws).
+- **Knowledge base:** CVEs (CISA KEV / NVD / OSV, with aliases, CVSS vector, affected/fixed
+  ranges) · **FIRST EPSS** (exploitation likelihood) · **ExploitDB** exploit availability ·
+  vendor advisories / **VEX (CSAF 2.0)** · **GTFOBins** (Linux privesc) · **LOLBAS** (Windows) ·
+  **MITRE ATT&CK** · **MITRE CWE** (classification) · **OWASP ASVS / WSTG** control catalogs +
+  **Cheat Sheets** (remediation) · **Wappalyzer** (7.6k signatures) · live web research
+  (DuckDuckGo / Tavily / Brave) — and the agent reasons **beyond** the docs (custom, non-CVE flaws).
+  Secrets are redacted before anything reaches the model or the index. _(CIS Benchmarks: import
+  interface + sample only — the real content is license-restricted.)_
 
 ## Setup
 
