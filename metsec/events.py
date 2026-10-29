@@ -15,10 +15,43 @@ _global: list[dict] = []
 _cur: contextvars.ContextVar = contextvars.ContextVar("metsec_events", default=None)
 _lock = threading.Lock()
 
+# Cooperative cancellation. A global flag (process-wide stop, e.g. on SIGTERM) plus an
+# optional per-run flag (ContextVar) so a parallel run can be stopped on its own. The agent
+# loop checks stop_requested() between turns and wraps up with the findings already recorded.
+_stop_global = threading.Event()
+_stop_cur: contextvars.ContextVar = contextvars.ContextVar("metsec_stop", default=None)
+
 
 def _buf() -> list:
     b = _cur.get()
     return _global if b is None else b
+
+
+def arm_stop() -> "threading.Event":
+    """Give this context its own cancel flag (for an isolated parallel run)."""
+    ev = threading.Event()
+    _stop_cur.set(ev)
+    return ev
+
+
+def request_stop() -> None:
+    """Ask the current run (and the process) to stop gracefully after the current turn."""
+    _stop_global.set()
+    ev = _stop_cur.get()
+    if ev is not None:
+        ev.set()
+
+
+def stop_requested() -> bool:
+    ev = _stop_cur.get()
+    return _stop_global.is_set() or (ev is not None and ev.is_set())
+
+
+def clear_stop() -> None:
+    _stop_global.clear()
+    ev = _stop_cur.get()
+    if ev is not None:
+        ev.clear()
 
 
 def new_stream() -> list:
@@ -49,6 +82,7 @@ def reset() -> None:
     b = _buf()
     with _lock:
         b.clear()
+    clear_stop()   # a fresh run starts with no pending cancel
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.events
@@ -75,4 +109,12 @@ if __name__ == "__main__":  # self-check: python -m metsec.events
     t.start()
     t.join()
     assert seen["n"] == 1 and count() == 1 and since(0)[0]["target"] == "main"  # global intact
+
+    # cancellation: request_stop trips stop_requested; reset()/clear_stop clears it
+    reset()
+    assert not stop_requested()
+    request_stop()
+    assert stop_requested()
+    clear_stop()
+    assert not stop_requested()
     print("events self-check ok")

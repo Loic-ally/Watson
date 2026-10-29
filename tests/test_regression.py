@@ -271,6 +271,31 @@ def test_csaf_vex_not_affected_is_data():
     assert advisories.vex_status(doc, "CVE-y", "Prod 1.0") == "not_affected"
 
 
+def test_graceful_stop_halts_without_calling_model():
+    # a cooperative stop requested before/between turns breaks the loop immediately — the
+    # model is never called again, already-recorded findings are kept, and cancelled is set
+    from metsec import agent as agentmod, config, events
+    a = _agent()
+    a.budget = 5
+    a.record_finding("already found", "low", "potential")   # recorded before the stop
+    events.request_stop()
+    calls = {"n": 0}
+
+    def boom(*_a, **_k):
+        calls["n"] += 1
+        raise AssertionError("model must not be called after a stop")
+
+    orig = config.client
+    config.client = boom
+    try:
+        findings = agentmod.run_agent(a, {"techs": []})
+    finally:
+        config.client = orig
+        events.clear_stop()
+    assert a.cancelled is True and calls["n"] == 0
+    assert len(findings) == 1 and findings[0].title == "already found"
+
+
 def _main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

@@ -35,6 +35,10 @@ export function evHtml(e: Ev): string {
       return `<div class="ev">▶️ <b>scan started</b> <span class="d">${esc(e.target)} [${esc(e.mode)}]</span></div>`;
     case "done":
       return `<div class="ev ev-win">✅ <b>assessment complete</b></div>`;
+    case "stopping":
+      return `<div class="ev ev-err">⏹ <b>stopping</b> <span class="d">${esc(e.reason || "operator requested")}</span></div>`;
+    case "stopped":
+      return `<div class="ev ev-err">⏹ <b>stopped by operator</b> <span class="d">${e.findings != null ? `${esc(e.findings)} finding(s) kept` : ""}</span></div>`;
     default:
       return "";
   }

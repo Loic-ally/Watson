@@ -28,7 +28,7 @@ async fn main() {
     let (tx, _) = broadcast::channel(2048);
     let state = Arc::new(AppState {
         sessions: Mutex::new(HashSet::new()),
-        run: Mutex::new(RunState { active: false, events: vec![], info: None }),
+        run: Mutex::new(RunState { active: false, events: vec![], info: None, pid: None }),
         tx,
     });
 
@@ -36,6 +36,7 @@ async fn main() {
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))
         .route("/api/chat", post(scan::api_chat))
+        .route("/api/stop", post(scan::api_stop))
         .route("/api/status", get(scan::api_status))
         .route("/stream", get(scan::stream))
         .route("/api/knowledge", get(files::api_knowledge))

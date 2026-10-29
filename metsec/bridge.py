@@ -74,6 +74,19 @@ def scan(params: dict) -> None:
             done.set()
 
     events.reset()
+    # Graceful stop: SIGTERM/SIGINT (e.g. from the web app's Stop button) asks the agent to
+    # halt after its current turn; the worker then still writes the report for what it found.
+    import signal
+
+    def _stop(signum, frame):
+        events.request_stop()
+        events.emit("stopping", reason="stop signal received")
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, _stop)
+        except (ValueError, OSError):  # not in main thread / unsupported — skip
+            pass
+
     events.emit("start", target=target, mode=mode)
     threading.Thread(target=work, daemon=True).start()
 

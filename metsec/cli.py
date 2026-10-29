@@ -200,6 +200,23 @@ def assess_cmd(args: list[str]) -> int:
     if exploit:
         print("⚠️  exploitation ENABLED — the agent will actively attack in-scope targets. "
               "Only use on systems you own/are authorized to break.")
+    # First Ctrl-C asks the agent to stop gracefully (halt after this step, still write the
+    # report); a second Ctrl-C aborts hard.
+    import signal
+
+    from . import events
+
+    def _graceful(signum, frame):
+        if events.stop_requested():
+            signal.signal(signal.SIGINT, signal.SIG_DFL)  # 2nd Ctrl-C → default hard abort
+            raise KeyboardInterrupt
+        print("\n⏹ stop requested — finishing the current step, then writing the report "
+              "(Ctrl-C again to abort)", file=sys.stderr, flush=True)
+        events.request_stop()
+    try:
+        signal.signal(signal.SIGINT, _graceful)
+    except (ValueError, OSError):
+        pass
     try:
         s = Scope.load(args[args.index("--scope") + 1])
         if s.mode != "static" and not target:

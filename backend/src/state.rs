@@ -10,6 +10,7 @@ pub struct RunState {
     pub active: bool,
     pub events: Vec<Value>, // backlog for late SSE subscribers
     pub info: Option<Value>, // {id,target,mode,status,report}
+    pub pid: Option<u32>,   // PID of the running scan bridge, for a graceful stop
 }
 
 pub struct AppState {

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/Layout";
+import { Button } from "@/components/ui/button";
+import { api, postJson } from "@/api";
 import { cn } from "@/lib/utils";
 import { evHtml, stageOf, type Ev } from "@/feed";
 
@@ -8,9 +10,13 @@ const STEPS = ["Recon", "Exploit", "Foothold", "Privesc", "ROOT"];
 export default function Dashboard() {
   const [stage, setStage] = useState(-1);
   const [events, setEvents] = useState<string[]>([]);
+  const [active, setActive] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const feed = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // seed the running state so the Stop button appears on a reload mid-scan
+    api("/api/status").then((r) => r.json()).then((d) => setActive(!!d.active)).catch(() => {});
     const src = new EventSource("/stream");
     src.onmessage = (ev) => {
       const e: Ev = JSON.parse(ev.data);
@@ -18,9 +24,24 @@ export default function Dashboard() {
       if (h) setEvents((prev) => [...prev, h]);
       const s = stageOf(e);
       if (s >= 0) setStage((cur) => Math.max(cur, s));
+      if (e.type === "start") { setActive(true); setStopping(false); }
+      if (e.type === "stopping") setStopping(true);
+      if (e.type === "done" || e.type === "stopped" || e.type === "error") {
+        setActive(false);
+        setStopping(false);
+      }
     };
     return () => src.close();
   }, []);
+
+  async function stop() {
+    setStopping(true);
+    try {
+      await postJson("/api/stop", {});
+    } catch {
+      setStopping(false);
+    }
+  }
 
   useEffect(() => {
     feed.current?.scrollTo(0, feed.current.scrollHeight);
@@ -29,7 +50,7 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader title="Live dashboard" sub="Kill-chain progress and agent activity in real time." />
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         {STEPS.map((label, i) => {
           const on = i <= stage;
           const root = i === 4;
@@ -47,6 +68,17 @@ export default function Dashboard() {
             </span>
           );
         })}
+        {active && (
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={stop}
+            disabled={stopping}
+            className="ml-auto"
+          >
+            {stopping ? "Stopping…" : "⏹ Stop scan"}
+          </Button>
+        )}
       </div>
       <div
         ref={feed}

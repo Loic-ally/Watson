@@ -128,6 +128,7 @@ class Agent:
         self.channel = None  # exec foothold once established
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
         self.done = False    # the agent declares the assessment complete
+        self.cancelled = False  # set when a graceful stop was requested mid-run
         self._calls: dict = {}  # repeat guard
         self.observations: list[Observation] = []  # evidence the agent actually collected
         self._obs_by_id: dict[str, Observation] = {}
@@ -753,6 +754,12 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     ]
     exhausted = True
     for _ in range(agent.budget):  # budget is a safety cap; the agent stops itself via finish()
+        if events.stop_requested():  # graceful cancel: halt now, keep findings already recorded
+            agent.cancelled, exhausted = True, False
+            events.emit("stopped", reason="cancelled by operator",
+                        findings=len(agent.findings))
+            print("  ⏹ stop requested — halting", file=sys.stderr, flush=True)
+            break
         if not turn(msgs) or agent.done:
             exhausted = False
             break

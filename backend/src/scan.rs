@@ -84,6 +84,7 @@ fn start_scan(state: Arc<AppState>, rid: String, verdict: Value) {
                 return;
             }
         };
+        state.run.lock().unwrap().pid = child.id(); // record PID so /api/stop can signal it
         let stdout = child.stdout.take().expect("piped");
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -116,12 +117,40 @@ fn push_event(state: &AppState, ev: Value) {
 fn finish_run(state: &AppState, report: Option<String>, err: Option<String>) {
     let mut r = state.run.lock().unwrap();
     r.active = false;
+    r.pid = None;
     if let Some(info) = r.info.as_mut() {
         info["status"] = json!(if err.is_some() { "error" } else { "done" });
         info["report"] = json!(report);
         if let Some(e) = err {
             info["error"] = json!(e);
         }
+    }
+}
+
+/// Graceful stop: SIGTERM the scan bridge. Its handler asks the agent to halt after the
+/// current turn and still write the report; the worker then emits `done` and we finish.
+pub async fn api_stop(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !authed(&state, &headers) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let pid = {
+        let r = state.run.lock().unwrap();
+        if !r.active {
+            return Json(json!({"stopped": false, "text": "no scan is running"})).into_response();
+        }
+        r.pid
+    };
+    match pid {
+        Some(p) => {
+            // SIGTERM is caught by the bridge for a graceful wrap-up (no new dependency).
+            let ok = std::process::Command::new("kill")
+                .arg("-TERM").arg(p.to_string()).status().map(|s| s.success()).unwrap_or(false);
+            push_event(&state, json!({"type": "stopping", "reason": "stop requested by operator"}));
+            Json(json!({"stopped": ok, "pid": p,
+                        "text": "stopping — finishing the current step and writing the report"}))
+                .into_response()
+        }
+        None => Json(json!({"stopped": false, "text": "scan pid unknown"})).into_response(),
     }
 }
 
