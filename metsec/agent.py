@@ -759,10 +759,16 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
 
     from . import cache
 
+    from . import memory
+
     target = target or scope.code_path
-    audit.start(f".metsec_cache/audit/metsec-{int(time.time())}.jsonl")
-    audit.log("start", target=target, mode=scope.mode, exploit=exploit)
-    ckey = (target, scope.mode, active)
+    project = getattr(scope, "authorized_by", "") or "default"   # groups audits of one owner
+    audit_path = f".metsec_cache/audit/metsec-{int(time.time())}.jsonl"
+    audit.start(audit_path)
+    audit.log("start", target=target, mode=scope.mode, exploit=exploit, project=project)
+    # cache key carries project + asset (scheme/host/PORT) so runs of different projects or of
+    # apps on different ports never share a recon inventory
+    ckey = (project, memory.asset_id(target), scope.mode, active)
     inv = None if fresh else cache.get(ckey)
     if inv is None:
         if scope.mode == "static":
@@ -776,8 +782,7 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
                 raw.update(active_recon(target, scope))
         inv = _inventory_json(raw)
         cache.put(inv, ckey)
-    from . import memory
-    note = memory.context(target)
+    note = memory.context(target, project)
     if note:
         inv = {**inv, "_memory": note}
     agent = Agent(scope, target, budget, exploit=exploit)
@@ -790,7 +795,8 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
                            f"{st['indeterminate']} indeterminate")
     from dataclasses import asdict as _asdict
     memory.remember(target, [_asdict(f) for f in agent.findings], inv,
-                    foothold=agent.channel.kind if agent.channel else "")
+                    foothold=agent.channel.kind if agent.channel else "",
+                    project=project, audit=audit_path)
     return agent
 
 
