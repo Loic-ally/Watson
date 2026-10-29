@@ -39,7 +39,9 @@ def _control(c: dict) -> dict:
             "references": list(c.get("references") or []),
             "preconditions": list(c.get("preconditions") or []),
             "expected_evidence": list(c.get("expected_evidence") or []),
-            "limits": c.get("limits", "")}
+            "limits": c.get("limits", ""),
+            "level": c.get("level", ""),          # optional (e.g. ASVS L1/L2/L3)
+            "cwe": list(c.get("cwe") or [])}      # CWE ids this control maps to
 
 
 def load_pack(data: dict) -> dict:
@@ -138,11 +140,38 @@ _CWE = {
 }
 
 
+_CWE_CATALOG: dict | None = None
+
+
+def _cwe_catalog() -> dict:
+    """The full MITRE CWE list (id → {name, description}), loaded once from data/cwe.json."""
+    global _CWE_CATALOG
+    if _CWE_CATALOG is None:
+        f = Path(__file__).resolve().parent / "data" / "cwe.json"
+        try:
+            _CWE_CATALOG = json.loads(f.read_text()).get("weaknesses", {})
+        except (OSError, ValueError):
+            _CWE_CATALOG = {}
+    return _CWE_CATALOG
+
+
 def remediation_for(cwe_id: str) -> dict | None:
-    c = _CWE.get((cwe_id or "").upper().strip())
-    if not c:
+    """Classification + remediation for a CWE. A curated OWASP Cheat Sheet is returned when
+    one exists; otherwise the real CWE name/description from the MITRE catalog is returned, so
+    any of the ~950 weaknesses is at least classified."""
+    key = (cwe_id or "").upper().strip()
+    cs = _CWE.get(key)
+    cat = _cwe_catalog().get(key)
+    if not cs and not cat:
         return None
-    return {"cwe": cwe_id.upper().strip(), "name": c[0], "cheat_sheet": c[1], "remediation": c[2]}
+    out = {"cwe": key, "name": cs[0] if cs else cat["name"]}
+    if cs:
+        out["cheat_sheet"] = cs[1]
+        out["remediation"] = cs[2]
+    if cat:
+        out["description"] = cat["description"]
+        out.setdefault("name", cat["name"])
+    return out
 
 
 if __name__ == "__main__":  # self-check: python -m metsec.controls (offline)
@@ -180,5 +209,17 @@ if __name__ == "__main__":  # self-check: python -m metsec.controls (offline)
 
     r = remediation_for("CWE-89")
     assert r["name"] == "SQL Injection" and "parameterized" in r["remediation"].lower()
+    # any MITRE CWE is at least classified from the full catalog (if data/cwe.json shipped)
+    if _cwe_catalog():
+        assert remediation_for("CWE-502")["name"]            # curated
+        assert (r312 := remediation_for("CWE-312")) and r312.get("description")  # catalog-only
     assert remediation_for("CWE-0000") is None
+
+    # the shipped catalogs load and validate (full ASVS / WSTG, plus the CIS sample)
+    for name in ("asvs-4.0.3", "wstg-4.2", "cis-fixture"):
+        pk = load_builtin(name)
+        assert pk["controls"], name
+    asvs = load_builtin("asvs-4.0.3")
+    assert len(asvs["controls"]) > 200 and asvs["version"] == "4.0.3"
+    assert any(c["id"] == "V5.3.4" for c in asvs["controls"])
     print("controls self-check ok")

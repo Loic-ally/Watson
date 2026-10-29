@@ -1,26 +1,1504 @@
 {
-  "framework": "OWASP WSTG",
-  "version": "4.2",
-  "source": "https://owasp.org/www-project-web-security-testing-guide/",
-  "note": "Representative subset of test procedures — not the full WSTG.",
-  "controls": [
-    {"id": "WSTG-ATHN-03", "title": "Testing for weak lockout mechanism",
-     "requirement": "Determine whether the account lockout mechanism mitigates brute force.",
-     "references": ["WSTG-ATHN-03"],
-     "preconditions": ["a login endpoint exists"],
-     "expected_evidence": ["repeated failed logins trigger lockout/throttling (observed status/delay)"],
-     "limits": "does not test credential-stuffing with valid-but-leaked creds"},
-    {"id": "WSTG-INPV-05", "title": "Testing for SQL injection",
-     "requirement": "Identify SQL injection points and assess exploitability.",
-     "references": ["WSTG-INPV-05", "CWE-89"],
-     "preconditions": ["user input reaches a database query"],
-     "expected_evidence": ["a parameter alters query results / error-based or boolean inference proven"],
-     "limits": "blind time-based testing may be rate-limited in prod"},
-    {"id": "WSTG-CONF-05", "title": "Enumerate admin interfaces",
-     "requirement": "Identify hidden administrator interfaces and functionality.",
-     "references": ["WSTG-CONF-05"],
-     "preconditions": ["the app is reachable over HTTP"],
-     "expected_evidence": ["admin path discovered and its access control observed"],
-     "limits": "authenticated admin logic tested under ATHZ"}
-  ]
+ "framework": "OWASP WSTG",
+ "version": "4.2",
+ "source": "https://github.com/OWASP/wstg",
+ "license": "CC BY-SA 4.0 (OWASP WSTG)",
+ "note": "OWASP WSTG test checklist, converted from the official checklist.md.",
+ "controls": [
+  {
+   "id": "WSTG-INFO-01",
+   "title": "[Information Gathering] Conduct Search Engine Reconnaissance for Information Leakage",
+   "requirement": "Conduct Search Engine Reconnaissance for Information Leakage",
+   "references": [
+    "WSTG-INFO-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-02",
+   "title": "[Information Gathering] Fingerprint Web Server",
+   "requirement": "Fingerprint Web Server",
+   "references": [
+    "WSTG-INFO-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-03",
+   "title": "[Information Gathering] Review Webserver Metafiles for Information Leakage",
+   "requirement": "Review Webserver Metafiles for Information Leakage",
+   "references": [
+    "WSTG-INFO-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-04",
+   "title": "[Information Gathering] Attack Surface Identification",
+   "requirement": "Attack Surface Identification",
+   "references": [
+    "WSTG-INFO-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-05",
+   "title": "[Information Gathering] Review Web Page Content for Information Leakage",
+   "requirement": "Review Web Page Content for Information Leakage",
+   "references": [
+    "WSTG-INFO-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-06",
+   "title": "[Information Gathering] Identify Application Entry Points",
+   "requirement": "Identify Application Entry Points",
+   "references": [
+    "WSTG-INFO-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-07",
+   "title": "[Information Gathering] Map Execution Paths Through Application",
+   "requirement": "Map Execution Paths Through Application",
+   "references": [
+    "WSTG-INFO-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-08",
+   "title": "[Information Gathering] Fingerprint Web Application Framework",
+   "requirement": "Fingerprint Web Application Framework",
+   "references": [
+    "WSTG-INFO-08"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-09",
+   "title": "[Information Gathering] Fingerprint Web Application",
+   "requirement": "Fingerprint Web Application",
+   "references": [
+    "WSTG-INFO-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INFO-10",
+   "title": "[Information Gathering] Map Application Architecture",
+   "requirement": "Map Application Architecture",
+   "references": [
+    "WSTG-INFO-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-01",
+   "title": "[Configuration and Deployment Management] Network Infrastructure Configuration",
+   "requirement": "Network Infrastructure Configuration",
+   "references": [
+    "WSTG-CONF-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-02",
+   "title": "[Configuration and Deployment Management] Application Platform Configuration",
+   "requirement": "Application Platform Configuration",
+   "references": [
+    "WSTG-CONF-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-03",
+   "title": "[Configuration and Deployment Management] File Extensions Handling for Sensitive Information",
+   "requirement": "File Extensions Handling for Sensitive Information",
+   "references": [
+    "WSTG-CONF-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-04",
+   "title": "[Configuration and Deployment Management] Review Old Backup and Unreferenced Files for Sensitive Information",
+   "requirement": "Review Old Backup and Unreferenced Files for Sensitive Information",
+   "references": [
+    "WSTG-CONF-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-05",
+   "title": "[Configuration and Deployment Management] Enumerate Infrastructure and Application Admin Interfaces",
+   "requirement": "Enumerate Infrastructure and Application Admin Interfaces",
+   "references": [
+    "WSTG-CONF-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-06",
+   "title": "[Configuration and Deployment Management] HTTP Methods",
+   "requirement": "HTTP Methods",
+   "references": [
+    "WSTG-CONF-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-07",
+   "title": "[Configuration and Deployment Management] HTTP Strict Transport Security",
+   "requirement": "HTTP Strict Transport Security",
+   "references": [
+    "WSTG-CONF-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-09",
+   "title": "[Configuration and Deployment Management] File Permissions",
+   "requirement": "File Permissions",
+   "references": [
+    "WSTG-CONF-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-10",
+   "title": "[Configuration and Deployment Management] Subdomain Takeover",
+   "requirement": "Subdomain Takeover",
+   "references": [
+    "WSTG-CONF-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-11",
+   "title": "[Configuration and Deployment Management] Cloud Storage",
+   "requirement": "Cloud Storage",
+   "references": [
+    "WSTG-CONF-11"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-12",
+   "title": "[Configuration and Deployment Management] Content Security Policy",
+   "requirement": "Content Security Policy",
+   "references": [
+    "WSTG-CONF-12"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-13",
+   "title": "[Configuration and Deployment Management] Path Confusion",
+   "requirement": "Path Confusion",
+   "references": [
+    "WSTG-CONF-13"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-14",
+   "title": "[Configuration and Deployment Management] Other HTTP Security Header Misconfigurations",
+   "requirement": "Other HTTP Security Header Misconfigurations",
+   "references": [
+    "WSTG-CONF-14"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CONF-15",
+   "title": "[Configuration and Deployment Management] Feature Flag Security Bypass",
+   "requirement": "Feature Flag Security Bypass",
+   "references": [
+    "WSTG-CONF-15"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-IDNT-01",
+   "title": "[Identity Management] Role Definitions",
+   "requirement": "Role Definitions",
+   "references": [
+    "WSTG-IDNT-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-IDNT-02",
+   "title": "[Identity Management] User Registration Process",
+   "requirement": "User Registration Process",
+   "references": [
+    "WSTG-IDNT-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-IDNT-03",
+   "title": "[Identity Management] Account Provisioning Process",
+   "requirement": "Account Provisioning Process",
+   "references": [
+    "WSTG-IDNT-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-IDNT-04",
+   "title": "[Identity Management] Account Enumeration and Guessable User Account",
+   "requirement": "Account Enumeration and Guessable User Account",
+   "references": [
+    "WSTG-IDNT-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-IDNT-05",
+   "title": "[Identity Management] Weak or Unenforced Username Policy",
+   "requirement": "Weak or Unenforced Username Policy",
+   "references": [
+    "WSTG-IDNT-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-01",
+   "title": "[Authentication] Credentials Transported over an Encrypted Channel",
+   "requirement": "Credentials Transported over an Encrypted Channel",
+   "references": [
+    "WSTG-ATHN-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-02",
+   "title": "[Authentication] Default Credentials",
+   "requirement": "Default Credentials",
+   "references": [
+    "WSTG-ATHN-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-03",
+   "title": "[Authentication] Weak Lock Out Mechanism",
+   "requirement": "Weak Lock Out Mechanism",
+   "references": [
+    "WSTG-ATHN-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-04",
+   "title": "[Authentication] Bypassing Authentication Schema",
+   "requirement": "Bypassing Authentication Schema",
+   "references": [
+    "WSTG-ATHN-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-05",
+   "title": "[Authentication] Vulnerable Remember Password",
+   "requirement": "Vulnerable Remember Password",
+   "references": [
+    "WSTG-ATHN-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-06",
+   "title": "[Authentication] Browser Cache Weaknesses",
+   "requirement": "Browser Cache Weaknesses",
+   "references": [
+    "WSTG-ATHN-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-07",
+   "title": "[Authentication] Weak Authentication Methods",
+   "requirement": "Weak Authentication Methods",
+   "references": [
+    "WSTG-ATHN-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-08",
+   "title": "[Authentication] Weak Security Question Answer",
+   "requirement": "Weak Security Question Answer",
+   "references": [
+    "WSTG-ATHN-08"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-09",
+   "title": "[Authentication] Weak Password Change or Reset Functionalities",
+   "requirement": "Weak Password Change or Reset Functionalities",
+   "references": [
+    "WSTG-ATHN-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-10",
+   "title": "[Authentication] Weaker Authentication in Alternative Channel",
+   "requirement": "Weaker Authentication in Alternative Channel",
+   "references": [
+    "WSTG-ATHN-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHN-11",
+   "title": "[Authentication] Multi-Factor Authentication (MFA)",
+   "requirement": "Multi-Factor Authentication (MFA)",
+   "references": [
+    "WSTG-ATHN-11"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHZ-01",
+   "title": "[Authorization] Directory Traversal File Include",
+   "requirement": "Directory Traversal File Include",
+   "references": [
+    "WSTG-ATHZ-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHZ-02",
+   "title": "[Authorization] Bypassing Authorization Schema",
+   "requirement": "Bypassing Authorization Schema",
+   "references": [
+    "WSTG-ATHZ-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHZ-03",
+   "title": "[Authorization] Privilege Escalation",
+   "requirement": "Privilege Escalation",
+   "references": [
+    "WSTG-ATHZ-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHZ-04",
+   "title": "[Authorization] Insecure Direct Object References",
+   "requirement": "Insecure Direct Object References",
+   "references": [
+    "WSTG-ATHZ-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ATHZ-05",
+   "title": "[Authorization] OAuth Weaknesses",
+   "requirement": "OAuth Weaknesses",
+   "references": [
+    "WSTG-ATHZ-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-01",
+   "title": "[Session Management] Session Management Schema",
+   "requirement": "Session Management Schema",
+   "references": [
+    "WSTG-SESS-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-02",
+   "title": "[Session Management] Cookies Attributes",
+   "requirement": "Cookies Attributes",
+   "references": [
+    "WSTG-SESS-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-03",
+   "title": "[Session Management] Session Fixation",
+   "requirement": "Session Fixation",
+   "references": [
+    "WSTG-SESS-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-04",
+   "title": "[Session Management] Exposed Session Variables",
+   "requirement": "Exposed Session Variables",
+   "references": [
+    "WSTG-SESS-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-05",
+   "title": "[Session Management] Cross Site Request Forgery",
+   "requirement": "Cross Site Request Forgery",
+   "references": [
+    "WSTG-SESS-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-06",
+   "title": "[Session Management] Logout Functionality",
+   "requirement": "Logout Functionality",
+   "references": [
+    "WSTG-SESS-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-07",
+   "title": "[Session Management] Session Timeout",
+   "requirement": "Session Timeout",
+   "references": [
+    "WSTG-SESS-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-08",
+   "title": "[Session Management] Session Puzzling",
+   "requirement": "Session Puzzling",
+   "references": [
+    "WSTG-SESS-08"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-09",
+   "title": "[Session Management] Session Hijacking",
+   "requirement": "Session Hijacking",
+   "references": [
+    "WSTG-SESS-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-10",
+   "title": "[Session Management] JSON Web Tokens",
+   "requirement": "JSON Web Tokens",
+   "references": [
+    "WSTG-SESS-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-SESS-11",
+   "title": "[Session Management] Concurrent Sessions",
+   "requirement": "Concurrent Sessions",
+   "references": [
+    "WSTG-SESS-11"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-01",
+   "title": "[Injection] Reflected Cross Site Scripting",
+   "requirement": "Reflected Cross Site Scripting",
+   "references": [
+    "WSTG-INJT-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-02",
+   "title": "[Injection] Stored Cross Site Scripting",
+   "requirement": "Stored Cross Site Scripting",
+   "references": [
+    "WSTG-INJT-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-03",
+   "title": "[Injection] HTTP Verb Tampering",
+   "requirement": "HTTP Verb Tampering",
+   "references": [
+    "WSTG-INJT-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-04",
+   "title": "[Injection] HTTP Parameter Pollution",
+   "requirement": "HTTP Parameter Pollution",
+   "references": [
+    "WSTG-INJT-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-05",
+   "title": "[Injection] SQL Injection",
+   "requirement": "SQL Injection",
+   "references": [
+    "WSTG-INJT-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-06",
+   "title": "[Injection] LDAP Injection",
+   "requirement": "LDAP Injection",
+   "references": [
+    "WSTG-INJT-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-07",
+   "title": "[Injection] XML Injection",
+   "requirement": "XML Injection",
+   "references": [
+    "WSTG-INJT-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-08",
+   "title": "[Injection] SSI Injection",
+   "requirement": "SSI Injection",
+   "references": [
+    "WSTG-INJT-08"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-09",
+   "title": "[Injection] XPath Injection",
+   "requirement": "XPath Injection",
+   "references": [
+    "WSTG-INJT-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-10",
+   "title": "[Injection] IMAP SMTP Injection",
+   "requirement": "IMAP SMTP Injection",
+   "references": [
+    "WSTG-INJT-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-11",
+   "title": "[Injection] Code Injection",
+   "requirement": "Code Injection",
+   "references": [
+    "WSTG-INJT-11"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-12",
+   "title": "[Injection] Command Injection",
+   "requirement": "Command Injection",
+   "references": [
+    "WSTG-INJT-12"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-13",
+   "title": "[Injection] Format String Injection",
+   "requirement": "Format String Injection",
+   "references": [
+    "WSTG-INJT-13"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-14",
+   "title": "[Injection] Incubated Vulnerability",
+   "requirement": "Incubated Vulnerability",
+   "references": [
+    "WSTG-INJT-14"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-15",
+   "title": "[Injection] HTTP Response Splitting",
+   "requirement": "HTTP Response Splitting",
+   "references": [
+    "WSTG-INJT-15"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-16",
+   "title": "[Injection] HTTP Request Smuggling",
+   "requirement": "HTTP Request Smuggling",
+   "references": [
+    "WSTG-INJT-16"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-17",
+   "title": "[Injection] Host Header Injection",
+   "requirement": "Host Header Injection",
+   "references": [
+    "WSTG-INJT-17"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-18",
+   "title": "[Injection] Server-side Template Injection",
+   "requirement": "Server-side Template Injection",
+   "references": [
+    "WSTG-INJT-18"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-19",
+   "title": "[Injection] Server-Side Request Forgery",
+   "requirement": "Server-Side Request Forgery",
+   "references": [
+    "WSTG-INJT-19"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-20",
+   "title": "[Injection] Mass Assignment",
+   "requirement": "Mass Assignment",
+   "references": [
+    "WSTG-INJT-20"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-21",
+   "title": "[Injection] CSV Injection",
+   "requirement": "CSV Injection",
+   "references": [
+    "WSTG-INJT-21"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-22",
+   "title": "[Injection] Prototype Pollution",
+   "requirement": "Prototype Pollution",
+   "references": [
+    "WSTG-INJT-22"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-INJT-23",
+   "title": "[Injection] Insecure Deserialization",
+   "requirement": "Insecure Deserialization",
+   "references": [
+    "WSTG-INJT-23"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ERRH-01",
+   "title": "[Error Handling] Improper Error Handling",
+   "requirement": "Improper Error Handling",
+   "references": [
+    "WSTG-ERRH-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-ERRH-02",
+   "title": "[Error Handling] Stack Traces",
+   "requirement": "Stack Traces",
+   "references": [
+    "WSTG-ERRH-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CRYP-01",
+   "title": "[Weak Cryptography] Weak Transport Layer Security",
+   "requirement": "Weak Transport Layer Security",
+   "references": [
+    "WSTG-CRYP-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CRYP-02",
+   "title": "[Weak Cryptography] Padding Oracle",
+   "requirement": "Padding Oracle",
+   "references": [
+    "WSTG-CRYP-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CRYP-03",
+   "title": "[Weak Cryptography] Sensitive Information Sent via Unencrypted Channels",
+   "requirement": "Sensitive Information Sent via Unencrypted Channels",
+   "references": [
+    "WSTG-CRYP-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CRYP-04",
+   "title": "[Weak Cryptography] Weak Cryptographic Primitives",
+   "requirement": "Weak Cryptographic Primitives",
+   "references": [
+    "WSTG-CRYP-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-01",
+   "title": "[Business Logic] Business Logic Data Validation",
+   "requirement": "Business Logic Data Validation",
+   "references": [
+    "WSTG-BUSL-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-02",
+   "title": "[Business Logic] Ability to Forge Requests",
+   "requirement": "Ability to Forge Requests",
+   "references": [
+    "WSTG-BUSL-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-03",
+   "title": "[Business Logic] Integrity Checks",
+   "requirement": "Integrity Checks",
+   "references": [
+    "WSTG-BUSL-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-04",
+   "title": "[Business Logic] Process Timing",
+   "requirement": "Process Timing",
+   "references": [
+    "WSTG-BUSL-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-05",
+   "title": "[Business Logic] Number of Times a Function Can Be Used Limits",
+   "requirement": "Number of Times a Function Can Be Used Limits",
+   "references": [
+    "WSTG-BUSL-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-06",
+   "title": "[Business Logic] Circumvention of Work Flows",
+   "requirement": "Circumvention of Work Flows",
+   "references": [
+    "WSTG-BUSL-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-07",
+   "title": "[Business Logic] Defenses Against Application Misuse",
+   "requirement": "Defenses Against Application Misuse",
+   "references": [
+    "WSTG-BUSL-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-08",
+   "title": "[Business Logic] Upload of Unexpected File Types",
+   "requirement": "Upload of Unexpected File Types",
+   "references": [
+    "WSTG-BUSL-08"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-09",
+   "title": "[Business Logic] Upload of Malicious Files",
+   "requirement": "Upload of Malicious Files",
+   "references": [
+    "WSTG-BUSL-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-BUSL-10",
+   "title": "[Business Logic] Payment Functionality",
+   "requirement": "Payment Functionality",
+   "references": [
+    "WSTG-BUSL-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-01",
+   "title": "[Client-side] DOM-Based Cross Site Scripting",
+   "requirement": "DOM-Based Cross Site Scripting",
+   "references": [
+    "WSTG-CLNT-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-02",
+   "title": "[Client-side] JavaScript Execution",
+   "requirement": "JavaScript Execution",
+   "references": [
+    "WSTG-CLNT-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-03",
+   "title": "[Client-side] HTML Injection",
+   "requirement": "HTML Injection",
+   "references": [
+    "WSTG-CLNT-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-04",
+   "title": "[Client-side] Client-side URL Redirect",
+   "requirement": "Client-side URL Redirect",
+   "references": [
+    "WSTG-CLNT-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-05",
+   "title": "[Client-side] CSS Injection",
+   "requirement": "CSS Injection",
+   "references": [
+    "WSTG-CLNT-05"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-06",
+   "title": "[Client-side] Client-side Resource Manipulation",
+   "requirement": "Client-side Resource Manipulation",
+   "references": [
+    "WSTG-CLNT-06"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-07",
+   "title": "[Client-side] Cross Origin Resource Sharing",
+   "requirement": "Cross Origin Resource Sharing",
+   "references": [
+    "WSTG-CLNT-07"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-09",
+   "title": "[Client-side] Clickjacking",
+   "requirement": "Clickjacking",
+   "references": [
+    "WSTG-CLNT-09"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-10",
+   "title": "[Client-side] WebSockets",
+   "requirement": "WebSockets",
+   "references": [
+    "WSTG-CLNT-10"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-11",
+   "title": "[Client-side] Web Messaging",
+   "requirement": "Web Messaging",
+   "references": [
+    "WSTG-CLNT-11"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-12",
+   "title": "[Client-side] Browser Storage",
+   "requirement": "Browser Storage",
+   "references": [
+    "WSTG-CLNT-12"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-13",
+   "title": "[Client-side] Cross Site Script Inclusion",
+   "requirement": "Cross Site Script Inclusion",
+   "references": [
+    "WSTG-CLNT-13"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-14",
+   "title": "[Client-side] Reverse Tabnabbing",
+   "requirement": "Reverse Tabnabbing",
+   "references": [
+    "WSTG-CLNT-14"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-CLNT-15",
+   "title": "[Client-side] Client-side Template Injection",
+   "requirement": "Client-side Template Injection",
+   "references": [
+    "WSTG-CLNT-15"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-APIT-01",
+   "title": "[API Testing] API Reconnaissance",
+   "requirement": "API Reconnaissance",
+   "references": [
+    "WSTG-APIT-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-APIT-02",
+   "title": "[API Testing] API Broken Object Level Authorization",
+   "requirement": "API Broken Object Level Authorization",
+   "references": [
+    "WSTG-APIT-02"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-APIT-03",
+   "title": "[API Testing] Excessive Data Exposure",
+   "requirement": "Excessive Data Exposure",
+   "references": [
+    "WSTG-APIT-03"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-APIT-04",
+   "title": "[API Testing] API Broken Function Level Authorization",
+   "requirement": "API Broken Function Level Authorization",
+   "references": [
+    "WSTG-APIT-04"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-APIT-99",
+   "title": "[API Testing] GraphQL",
+   "requirement": "GraphQL",
+   "references": [
+    "WSTG-APIT-99"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  },
+  {
+   "id": "WSTG-WASM-01",
+   "title": "[WebAssembly Testing] WebAssembly Reconnaissance",
+   "requirement": "WebAssembly Reconnaissance",
+   "references": [
+    "WSTG-WASM-01"
+   ],
+   "preconditions": [],
+   "expected_evidence": [],
+   "limits": "",
+   "level": "",
+   "cwe": []
+  }
+ ]
 }

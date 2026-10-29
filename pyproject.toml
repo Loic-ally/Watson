@@ -20,7 +20,7 @@ dependencies = [
 metsec = "metsec.cli:main"
 
 [tool.setuptools.package-data]
-metsec = ["data/**/*.json"]
+metsec = ["data/*.json", "data/**/*.json"]
 
 [build-system]
 requires = ["setuptools>=68"]
