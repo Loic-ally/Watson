@@ -176,7 +176,17 @@ class Agent:
                 item["public_exploits"] = [{"id": e["id"], "url": e["url"],
                                             "metasploit": e["metasploit"]} for e in ex[:3]]
             out.append(item)
-        return out[:12]
+        out = out[:12]
+        try:  # EPSS: likelihood-of-exploitation signal (best-effort, dated, never fabricated)
+            from .epss import enrich
+            scores = enrich([i["id"] for i in out])
+            for i in out:
+                if (e := scores.get(i["id"])):
+                    i["epss"] = {"score": e["score"], "percentile": e["percentile"],
+                                 "date": e["date"]}
+        except Exception:  # noqa: BLE001 — enrichment is optional
+            pass
+        return out
 
     def http_probe(self, url: str, method: str = "GET", param: str | None = None,
                    value: str | None = None, cookie: str | None = None) -> dict:
