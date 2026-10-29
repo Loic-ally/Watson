@@ -1,4 +1,4 @@
-//! Spawns `python -m metsec.bridge` for the four Python-only jobs.
+//! Spawns `python -m watson.bridge` for the four Python-only jobs.
 use std::process::Stdio;
 
 use axum::body::Bytes;
@@ -9,7 +9,7 @@ use tokio::process::Command;
 use crate::state::root;
 
 fn python() -> String {
-    if let Ok(p) = std::env::var("METSEC_PYTHON") {
+    if let Ok(p) = std::env::var("WATSON_PYTHON") {
         return p;
     }
     let venv = root().join(".venv/bin/python");
@@ -19,10 +19,10 @@ fn python() -> String {
     "python3".into()
 }
 
-/// A `python -m metsec.bridge` command rooted at the project dir.
+/// A `python -m watson.bridge` command rooted at the project dir.
 pub fn bridge() -> Command {
     let mut c = Command::new(python());
-    c.arg("-m").arg("metsec.bridge").current_dir(root());
+    c.arg("-m").arg("watson.bridge").current_dir(root());
     c
 }
 

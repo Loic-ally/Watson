@@ -1,4 +1,4 @@
-"""MetSec regression suite — the mandatory reliability cases, fully OFFLINE.
+"""Watson regression suite — the mandatory reliability cases, fully OFFLINE.
 
 No network, no paid model calls, no external scanners. Runnable two ways:
     python -m tests.test_regression      (plain asserts; prints a summary)
@@ -14,13 +14,13 @@ import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from metsec import advisories, controls, redact, report, revalidate
-from metsec.agent import Agent, _clean_cvss
-from metsec.memory import asset_id
-from metsec.rag import CveIndex, _record
-from metsec.research import _parse_osv, research
-from metsec.scope import Scope
-from metsec.static import analyze
+from watson import advisories, controls, redact, report, revalidate
+from watson.agent import Agent, _clean_cvss
+from watson.memory import asset_id
+from watson.rag import CveIndex, _record
+from watson.research import _parse_osv, research
+from watson.scope import Scope
+from watson.static import analyze
 from pathlib import Path
 
 
@@ -121,7 +121,7 @@ def test_cvss_absent_or_invalid_is_dropped():
                         "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"})
     assert good["base_score"] == 9.8
     # report never fabricates a score from severity, and never emits an implicit zero
-    from metsec.agent import Finding
+    from watson.agent import Finding
     assert report.cvss(Finding("x", "critical", "verified")) is None
     assert report.max_authentic_cvss([Finding("x", "critical", "verified")]) is None
 
@@ -148,7 +148,7 @@ def test_two_ports_are_distinct_assets():
 # --- 7. two audits in different projects ---------------------------------------------------
 
 def test_two_projects_isolated():
-    import metsec.memory as memory
+    import watson.memory as memory
     with tempfile.TemporaryDirectory() as d:
         memory.MEM_DIR = Path(d)
         t = "http://10.0.0.9:8000/"
@@ -275,7 +275,7 @@ def test_authenticated_session_reaches_the_agent():
     # the authenticated login session must ride the agent's probes, else the auth surface
     # is untestable (the reported "credentials are ignored" bug)
     import os
-    from metsec import auth
+    from watson import auth
     os.environ["RT_USER"], os.environ["RT_PASS"] = "alice", "pw123"
 
     class H(BaseHTTPRequestHandler):
@@ -323,7 +323,7 @@ def test_authenticated_session_reaches_the_agent():
 def test_scope_for_uses_configured_auth():
     # the web/chat flow must pick up scope.yaml's auth block (not drop it)
     import os
-    from metsec import runs
+    from watson import runs
     with tempfile.TemporaryDirectory() as d:
         Path(d, "scope.yaml").write_text(
             "authorized_by: owner\nmode: prod\nips:\n  - 127.0.0.1\n"
@@ -342,7 +342,7 @@ def test_scope_for_uses_configured_auth():
 def test_graceful_stop_halts_without_calling_model():
     # a cooperative stop requested before/between turns breaks the loop immediately — the
     # model is never called again, already-recorded findings are kept, and cancelled is set
-    from metsec import agent as agentmod, config, events
+    from watson import agent as agentmod, config, events
     a = _agent()
     a.budget = 5
     a.record_finding("already found", "low", "potential")   # recorded before the stop
@@ -362,6 +362,20 @@ def test_graceful_stop_halts_without_calling_model():
         events.clear_stop()
     assert a.cancelled is True and calls["n"] == 0
     assert len(findings) == 1 and findings[0].title == "already found"
+
+
+def test_ad_target_must_sit_inside_authorized_scope():
+    # Phase 8 reaches hosts/subnets, not just URLs — the scope boundary must still hold.
+    s = Scope(ips=["10.0.0.0/24"], authorized_by="owner", mode="dev")
+    assert s.contains("10.0.0.5") and s.contains("10.0.0.0/26")   # host + subnet inside scope
+    assert not s.contains("10.0.1.5") and not s.contains("10.0.0.0/16")  # outside / too wide
+
+
+def test_domain_compromise_is_detected_from_any_tool_output():
+    from watson import ad
+    assert ad.owned("SMB  10.0.0.5  (Pwn3d!)")           # nxc admin/exec
+    assert ad.owned("krbtgt:502:aad3b435b51404ee...:31d6cfe0...")  # secretsdump reached the KDC
+    assert not ad.owned("STATUS_LOGON_FAILURE")
 
 
 def _main() -> int:

@@ -1,5 +1,5 @@
 [project]
-name = "metsec"
+name = "watson"
 version = "0.0.1"
 description = "Autonomous AI pentest agent for your own site, powered by Meta Muse models + a CVE RAG."
 requires-python = ">=3.11"
@@ -17,10 +17,13 @@ dependencies = [
 ]
 
 [project.scripts]
-metsec = "metsec.cli:main"
+watson = "watson.cli:main"
+
+[tool.setuptools]
+packages = ["watson"]
 
 [tool.setuptools.package-data]
-metsec = ["data/*.json", "data/**/*.json"]
+watson = ["data/*.json", "data/**/*.json"]
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -21,7 +21,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="flex w-56 flex-col border-r border-border bg-card/30 py-5">
         <div className="flex items-center gap-2 px-5 pb-6 text-base font-semibold tracking-tight">
-          <Hexagon className="size-5" strokeWidth={2.2} /> MetSec
+          <Hexagon className="size-5" strokeWidth={2.2} /> Watson
         </div>
         <nav className="flex flex-col gap-0.5 px-3">
           {NAV.map(({ to, label, icon: Icon, end }) => (

@@ -4,12 +4,12 @@ scope.yaml
 __pycache__/
 *.egg-info/
 *.pyc
-.metsec_cache/
+.watson_cache/
 ROADMAP.md
 testbed/vulnapp.db
 .DS_Store
 .vscode/
-metsec-report-*
+watson-report-*
 template.html
 
 # Rust/TS web UI

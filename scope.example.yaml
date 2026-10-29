@@ -1,4 +1,4 @@
-# Copy to scope.yaml and edit. MetSec refuses to run without this.
+# Copy to scope.yaml and edit. Watson refuses to run without this.
 # Only list targets you own or are explicitly authorized to test.
 
 authorized_by: "Your Name <you@example.com>"   # required: who authorizes this scan

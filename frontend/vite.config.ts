@@ -4,7 +4,7 @@ import path from "node:path";
 
 // Dev: proxy API/SSE/shots to the Rust backend on :8787.
 // Prod: `npm run build` -> dist/, which the Rust server serves directly.
-const target = process.env.METSEC_BACKEND || "http://127.0.0.1:8787";
+const target = process.env.WATSON_BACKEND || "http://127.0.0.1:8787";
 
 export default defineConfig({
   plugins: [react()],

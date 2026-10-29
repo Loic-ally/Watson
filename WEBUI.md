@@ -1,15 +1,15 @@
-# MetSec web UI — Rust backend + TypeScript frontend
+# Watson web UI — Rust backend + TypeScript frontend
 
 The browser control panel is a **React/TypeScript SPA** (Vite + Tailwind +
 shadcn/ui) served by a **thin Rust (Axum) backend**. The Python agent is
-untouched — the Rust server shells out to `python -m metsec.bridge` for the four
+untouched — the Rust server shells out to `python -m watson.bridge` for the four
 jobs that need Python (classify a chat message, run a scan + stream events,
 search the RAG index, transcribe audio). Reports and screenshots are plain files
 on disk, served directly by Rust.
 
 ```
-TS SPA (Vite/React)  ──HTTP + SSE──►  Rust (Axum)  ──spawn──►  python -m metsec.bridge  ──►  metsec agent
-                                         │ reads metsec-report-*/ , .metsec_cache/shots/ directly
+TS SPA (Vite/React)  ──HTTP + SSE──►  Rust (Axum)  ──spawn──►  python -m watson.bridge  ──►  watson agent
+                                         │ reads watson-report-*/ , .watson_cache/shots/ directly
 ```
 
 ## Features
@@ -38,7 +38,7 @@ cd backend && cargo run
 
 # 2. frontend (Vite dev server, proxies /api,/stream,/shot to :8787)
 cd frontend && npm install && npm run dev
-# open the URL Vite prints (login: admin / metsec)
+# open the URL Vite prints (login: admin / watson)
 ```
 
 ## Run (single server)
@@ -54,13 +54,13 @@ cd ../backend && cargo run          # http://127.0.0.1:8787
 
 | var | default | meaning |
 |-----|---------|---------|
-| `METSEC_WEB_USER` / `METSEC_WEB_PASS` | `admin` / `metsec` | login (change the password!) |
-| `METSEC_PORT` | `8787` | backend port |
-| `METSEC_PYTHON` | `.venv/bin/python` else `python3` | python used for the bridge |
-| `METSEC_ROOT` | this crate's parent | project dir (reports, venv, SPA) |
+| `WATSON_WEB_USER` / `WATSON_WEB_PASS` | `admin` / `watson` | login (change the password!) |
+| `WATSON_PORT` | `8787` | backend port |
+| `WATSON_PYTHON` | `.venv/bin/python` else `python3` | python used for the bridge |
+| `WATSON_ROOT` | this crate's parent | project dir (reports, venv, SPA) |
 
 The agent still needs its Muse API credentials (`.env`) for chat, scans,
 knowledge search and transcription.
 
-The legacy Flask control panel (`metsec web`) still works and shares the same
+The legacy Flask control panel (`watson web`) still works and shares the same
 report/screenshot files; this Rust/TS UI supersedes it.

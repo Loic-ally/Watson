@@ -15,7 +15,7 @@ use crate::state::AppState;
 pub fn cookie_token(headers: &HeaderMap) -> Option<String> {
     headers.get(header::COOKIE)?.to_str().ok()?.split(';').find_map(|kv| {
         let (k, v) = kv.trim().split_once('=')?;
-        (k == "metsec_session").then(|| v.to_string())
+        (k == "watson_session").then(|| v.to_string())
     })
 }
 
@@ -33,12 +33,12 @@ pub struct Login {
 }
 
 pub async fn login(State(state): State<Arc<AppState>>, Json(b): Json<Login>) -> Response {
-    let user = std::env::var("METSEC_WEB_USER").unwrap_or_else(|_| "admin".into());
-    let pass = std::env::var("METSEC_WEB_PASS").unwrap_or_else(|_| "metsec".into());
+    let user = std::env::var("WATSON_WEB_USER").unwrap_or_else(|_| "admin".into());
+    let pass = std::env::var("WATSON_WEB_PASS").unwrap_or_else(|_| "watson".into());
     if b.user == user && b.password == pass {
         let token = uuid::Uuid::new_v4().simple().to_string();
         state.sessions.lock().unwrap().insert(token.clone());
-        let cookie = format!("metsec_session={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400");
+        let cookie = format!("watson_session={token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400");
         ([(header::SET_COOKIE, cookie)], Json(json!({"ok": true}))).into_response()
     } else {
         (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid credentials"}))).into_response()

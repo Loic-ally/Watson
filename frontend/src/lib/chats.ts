@@ -4,8 +4,8 @@
 export type Msg = { role: "user" | "bot" | "sys" | "feed"; html: string };
 export type Conversation = { id: string; title: string; updated: number; messages: Msg[] };
 
-const KEY = "metsec.chats";
-const ACTIVE = "metsec.activeChat";
+const KEY = "watson.chats";
+const ACTIVE = "watson.activeChat";
 const MAX = 50; // cap stored conversations
 
 export const GREETING: Msg = {

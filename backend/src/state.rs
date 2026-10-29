@@ -20,9 +20,9 @@ pub struct AppState {
 }
 
 /// Project directory. Defaults to this crate's parent (resolved at build time) so
-/// the binary spawns the bridge correctly from any cwd; override with METSEC_ROOT.
+/// the binary spawns the bridge correctly from any cwd; override with WATSON_ROOT.
 pub fn root() -> PathBuf {
-    if let Ok(r) = std::env::var("METSEC_ROOT") {
+    if let Ok(r) = std::env::var("WATSON_ROOT") {
         return PathBuf::from(r);
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

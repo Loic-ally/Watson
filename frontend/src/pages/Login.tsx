@@ -23,7 +23,7 @@ export default function Login() {
   return (
     <div className="mx-auto mt-[12vh] max-w-sm px-4 text-center">
       <div className="mb-1 flex items-center justify-center gap-2 text-2xl font-extrabold text-primary">
-        <Hexagon className="size-6" /> MetSec
+        <Hexagon className="size-6" /> Watson
       </div>
       <p className="mb-6 text-sm text-muted-foreground">Autonomous pentest agent — control panel</p>
       <Card>

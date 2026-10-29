@@ -1,13 +1,13 @@
-//! MetSec backend — thin Axum server.
+//! Watson backend — thin Axum server.
 //!
 //! Owns HTTP, session auth, SSE and static serving. Delegates the four
 //! Python-only jobs (classify a chat message, run a scan, search the RAG index,
-//! transcribe audio) to `python -m metsec.bridge`. Reports and screenshots are
+//! transcribe audio) to `python -m watson.bridge`. Reports and screenshots are
 //! plain files on disk, served directly. Agent code is untouched.
 //!
-//! Env: METSEC_WEB_USER / METSEC_WEB_PASS (login, default admin/metsec),
-//!      METSEC_PYTHON (python for the bridge), METSEC_ROOT (project dir),
-//!      METSEC_PORT (default 8787).
+//! Env: WATSON_WEB_USER / WATSON_WEB_PASS (login, default admin/watson),
+//!      WATSON_PYTHON (python for the bridge), WATSON_ROOT (project dir),
+//!      WATSON_PORT (default 8787).
 
 mod auth;
 mod bridge;
@@ -49,13 +49,13 @@ async fn main() {
         .fallback_service(tower_http::services::ServeDir::new(root().join("frontend/dist")))
         .with_state(state);
 
-    let port: u16 = std::env::var("METSEC_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8787);
+    let port: u16 = std::env::var("WATSON_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8787);
     let addr = format!("127.0.0.1:{port}");
-    let user = std::env::var("METSEC_WEB_USER").unwrap_or_else(|_| "admin".into());
-    if std::env::var("METSEC_WEB_PASS").unwrap_or_else(|_| "metsec".into()) == "metsec" {
-        eprintln!("⚠️  default web password 'metsec' — set METSEC_WEB_PASS to change it");
+    let user = std::env::var("WATSON_WEB_USER").unwrap_or_else(|_| "admin".into());
+    if std::env::var("WATSON_WEB_PASS").unwrap_or_else(|_| "watson".into()) == "watson" {
+        eprintln!("⚠️  default web password 'watson' — set WATSON_WEB_PASS to change it");
     }
-    println!("  🌐  MetSec backend: http://{addr}   (login: {user})");
+    println!("  🌐  Watson backend: http://{addr}   (login: {user})");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

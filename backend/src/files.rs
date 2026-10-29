@@ -39,7 +39,7 @@ pub async fn api_transcribe(State(state): State<Arc<AppState>>, headers: HeaderM
 }
 
 fn valid_report(name: &str) -> bool {
-    name.starts_with("metsec-report-")
+    name.starts_with("watson-report-")
         && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
 
@@ -147,7 +147,7 @@ pub async fn shot(State(state): State<Arc<AppState>>, headers: HeaderMap, AxPath
     if !id.chars().all(|c| c.is_alphanumeric()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match std::fs::read(root().join(".metsec_cache/shots").join(format!("{id}.png"))) {
+    match std::fs::read(root().join(".watson_cache/shots").join(format!("{id}.png"))) {
         Ok(bytes) => ([(header::CONTENT_TYPE, "image/png")], bytes).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }

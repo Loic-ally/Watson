@@ -1,5 +1,5 @@
 [package]
-name = "metsec-backend"
+name = "watson-backend"
 version = "0.1.0"
 edition = "2021"
 
