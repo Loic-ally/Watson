@@ -1,0 +1,26 @@
+{
+  "framework": "OWASP WSTG",
+  "version": "4.2",
+  "source": "https://owasp.org/www-project-web-security-testing-guide/",
+  "note": "Representative subset of test procedures — not the full WSTG.",
+  "controls": [
+    {"id": "WSTG-ATHN-03", "title": "Testing for weak lockout mechanism",
+     "requirement": "Determine whether the account lockout mechanism mitigates brute force.",
+     "references": ["WSTG-ATHN-03"],
+     "preconditions": ["a login endpoint exists"],
+     "expected_evidence": ["repeated failed logins trigger lockout/throttling (observed status/delay)"],
+     "limits": "does not test credential-stuffing with valid-but-leaked creds"},
+    {"id": "WSTG-INPV-05", "title": "Testing for SQL injection",
+     "requirement": "Identify SQL injection points and assess exploitability.",
+     "references": ["WSTG-INPV-05", "CWE-89"],
+     "preconditions": ["user input reaches a database query"],
+     "expected_evidence": ["a parameter alters query results / error-based or boolean inference proven"],
+     "limits": "blind time-based testing may be rate-limited in prod"},
+    {"id": "WSTG-CONF-05", "title": "Enumerate admin interfaces",
+     "requirement": "Identify hidden administrator interfaces and functionality.",
+     "references": ["WSTG-CONF-05"],
+     "preconditions": ["the app is reachable over HTTP"],
+     "expected_evidence": ["admin path discovered and its access control observed"],
+     "limits": "authenticated admin logic tested under ATHZ"}
+  ]
+}

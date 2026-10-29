@@ -19,6 +19,9 @@ dependencies = [
 [project.scripts]
 metsec = "metsec.cli:main"
 
+[tool.setuptools.package-data]
+metsec = ["data/**/*.json"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

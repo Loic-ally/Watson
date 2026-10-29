@@ -1,0 +1,14 @@
+{
+  "framework": "CIS Benchmark (SAMPLE FIXTURE — not official CIS content)",
+  "version": "fixture-0",
+  "source": "https://www.cisecurity.org/cis-benchmarks",
+  "note": "CIS Benchmark content is license-restricted and not redistributable. This is a SAMPLE used only to exercise the import interface. Import a real pack exported under your own CIS agreement via controls.import_cis().",
+  "controls": [
+    {"id": "CIS-1.1.1", "title": "Ensure the server banner does not disclose version",
+     "requirement": "The HTTP Server header must not reveal the exact software version.",
+     "references": ["CIS sample"],
+     "preconditions": ["the service returns a Server header"],
+     "expected_evidence": ["Server header observed without a version string"],
+     "limits": "sample control for interface testing only"}
+  ]
+}

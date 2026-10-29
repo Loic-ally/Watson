@@ -1,0 +1,32 @@
+{
+  "framework": "OWASP ASVS",
+  "version": "4.0.3",
+  "source": "https://owasp.org/www-project-application-security-verification-standard/",
+  "note": "Representative subset for the coverage tracker — not the full ASVS catalog.",
+  "controls": [
+    {"id": "V2.1.1", "title": "Password length",
+     "requirement": "Verify that user set passwords are at least 12 characters in length.",
+     "references": ["ASVS V2.1.1", "CWE-521"],
+     "preconditions": ["an authentication flow accepts user-chosen passwords"],
+     "expected_evidence": ["registration/password-change accepts a 64-char password and rejects < 12"],
+     "limits": "does not assess password storage/hashing (see V2.4)"},
+    {"id": "V3.2.1", "title": "Session token generation",
+     "requirement": "Verify the application generates a new session token on authentication.",
+     "references": ["ASVS V3.2.1", "CWE-384"],
+     "preconditions": ["a login flow issues a session cookie"],
+     "expected_evidence": ["session id observed before vs after login differs"],
+     "limits": "token entropy is assessed separately (V3.2.2)"},
+    {"id": "V5.3.4", "title": "SQL injection defense",
+     "requirement": "Verify that data selection or database queries use parameterized queries.",
+     "references": ["ASVS V5.3.4", "CWE-89"],
+     "preconditions": ["the app issues database queries from user input"],
+     "expected_evidence": ["injection payloads do not alter query semantics; SAST shows parameterization"],
+     "limits": "stored procedures reviewed separately"},
+    {"id": "V14.4.1", "title": "Security headers — content type",
+     "requirement": "Verify that every HTTP response sets a safe Content-Type with charset.",
+     "references": ["ASVS V14.4.1"],
+     "preconditions": ["the app serves HTTP responses"],
+     "expected_evidence": ["responses carry Content-Type and X-Content-Type-Options: nosniff"],
+     "limits": "CSP assessed in V14.4.3"}
+  ]
+}

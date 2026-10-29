@@ -406,7 +406,67 @@ def main(argv: list[str] | None = None) -> int:
         out = make_pdf(rest[0])
         print(f"wrote {out}" if out else "no findings.json in that directory")
         return 0 if out else 1
+    if cmd == "epss":
+        return epss_cmd(rest)
+    if cmd == "advisory":
+        return advisory_cmd(rest)
+    if cmd == "controls":
+        return controls_cmd(rest)
     print(usage)
+    return 2
+
+
+def epss_cmd(args: list[str]) -> int:
+    """metsec epss <CVE…>            ad-hoc EPSS score/percentile/date (FIRST API)
+       metsec epss --sync [DATE]     download+cache the daily EPSS CSV for bulk enrichment"""
+    from . import epss
+    if "--sync" in args:
+        rest = [a for a in args if a != "--sync"]
+        n = epss.sync(rest[0] if rest else None)
+        print(f"synced {n} EPSS scores")
+        return 0
+    if not args:
+        print("usage: metsec epss <CVE-...> [CVE-...] | metsec epss --sync [YYYY-MM-DD]")
+        return 2
+    for cve, r in epss.lookup(args).items():
+        print(f"{cve}  score={r['score']:.5f}  percentile={r['percentile']:.5f}  ({r['date']})")
+    return 0
+
+
+def advisory_cmd(args: list[str]) -> int:
+    """metsec advisory <file|url> [--save]   parse a CSAF/VEX advisory; --save folds it into RAG."""
+    if not args:
+        print("usage: metsec advisory <csaf.json | https://…> [--save]")
+        return 2
+    from .advisories import fetch_csaf, load_file
+    src = args[0]
+    recs = fetch_csaf(src) if src.startswith("http") else load_file(src)
+    for r in recs:
+        import json as _j
+        ap = _j.loads(r["applicability"] or "{}")
+        print(f"{r['id']}  [{r['source']}]  vex={ap.get('vex')}  status={ap.get('status')}  "
+              f"fixed={r['fixed_versions']}")
+    if "--save" in args and recs:
+        from .rag import CveIndex
+        print(f"ingested {CveIndex().sync(recs)} advisory record(s) into the index")
+    return 0 if recs else 1
+
+
+def controls_cmd(args: list[str]) -> int:
+    """metsec controls list                 list shipped control packs
+       metsec controls show <pack>          print a pack's controls (e.g. asvs-4.0.3)"""
+    from . import controls
+    if not args or args[0] == "list":
+        for p in controls.available_packs():
+            pk = controls.load_builtin(p[:-5])
+            print(f"{p[:-5]:16} {pk['framework']} {pk['version']}  ({len(pk['controls'])} controls)")
+        return 0
+    if args[0] == "show" and len(args) > 1:
+        pk = controls.load_builtin(args[1])
+        for c in pk["controls"]:
+            print(f"  {c['id']:14} {c['title']}")
+        return 0
+    print("usage: metsec controls {list | show <pack>}")
     return 2
 
 
