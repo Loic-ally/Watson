@@ -129,6 +129,8 @@ class Agent:
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
         self.done = False    # the agent declares the assessment complete
         self.cancelled = False  # set when a graceful stop was requested mid-run
+        self.authed = False  # an authenticated session is loaded (self.session carries it)
+        self.auth_role = ""  # the role of the logged-in test account
         self._calls: dict = {}  # repeat guard
         self.observations: list[Observation] = []  # evidence the agent actually collected
         self._obs_by_id: dict[str, Observation] = {}
@@ -746,6 +748,12 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     user = (f"Recon inventory for {agent.target}:\n"
             + redact.redact(json.dumps(_select_inventory(inv_dump), default=str))
             + "\n\nInvestigate with the tools and record grounded findings. Stop when done.")
+    if getattr(agent, "authed", False):
+        user = (f"AUTHENTICATED SESSION: you are logged in as a '{agent.auth_role}' test account; "
+                "every http_probe you send carries that session automatically. Prioritise the "
+                "AUTHENTICATED attack surface — broken access control, IDOR (enumerate object "
+                "ids), privilege escalation, and functions only reachable once logged in — not "
+                "just the public pages.\n\n") + user
     if mem:
         user = mem + "\n\n" + user
     msgs = [
@@ -807,6 +815,18 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
     if note:
         inv = {**inv, "_memory": note}
     agent = Agent(scope, target, budget, exploit=exploit)
+    if scope.mode != "static" and scope.auth:   # log in so the agent's probes are authenticated
+        from . import auth as _auth
+        try:
+            agent.session = _auth.login(scope)   # session cookies now ride every http_probe
+            agent.authed = True
+            acct = (scope.auth.get("accounts") or [{}])[0]
+            agent.auth_role = acct.get("role", "user")
+            events.emit("tool", name="auth", detail=f"logged in as {agent.auth_role} test account")
+            audit.log("auth", role=agent.auth_role, login_url=scope.auth.get("login_url"),
+                      accounts=len(scope.auth.get("accounts") or []))
+        except OutOfScope as e:
+            events.emit("error", msg=f"authentication failed: {e}")
     run_agent(agent, inv)
     if revalidate:
         from .revalidate import revalidate as _reval

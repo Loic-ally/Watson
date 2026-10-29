@@ -24,10 +24,29 @@ _lock = threading.Lock()
 
 
 def scope_for(target: str, mode: str, authorized_by: str):
-    """Build a Scope from a target URL/host. The logged-in user asserts authorization."""
-    from .scope import Scope
+    """Build a Scope from a target URL/host. The logged-in user asserts authorization.
+
+    If a scope.yaml in the project root already covers this target, reuse it — crucially its
+    `auth` block — so configured test credentials are actually used (only the mode is
+    overridden to what the operator asked for). Otherwise fall back to a bare scope.
+    """
+    import dataclasses
+    from pathlib import Path
+
+    from .scope import OutOfScope, Scope
 
     host = urlparse(target).hostname or target
+    for p in (Path("scope.yaml"), Path("scope.yml")):
+        if not p.exists():
+            continue
+        try:
+            configured = Scope.load(p)
+        except (OutOfScope, OSError, ValueError):
+            break
+        if configured.contains(target):           # reuse its targets + auth, honor chosen mode
+            return dataclasses.replace(configured, mode=mode,
+                                       authorized_by=configured.authorized_by or authorized_by)
+        break  # a scope.yaml exists but doesn't cover this target → bare scope below
     try:
         ipaddress.ip_address(host)
         return Scope(ips=[host], authorized_by=authorized_by, mode=mode)

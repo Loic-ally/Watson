@@ -271,6 +271,74 @@ def test_csaf_vex_not_affected_is_data():
     assert advisories.vex_status(doc, "CVE-y", "Prod 1.0") == "not_affected"
 
 
+def test_authenticated_session_reaches_the_agent():
+    # the authenticated login session must ride the agent's probes, else the auth surface
+    # is untestable (the reported "credentials are ignored" bug)
+    import os
+    from metsec import auth
+    os.environ["RT_USER"], os.environ["RT_PASS"] = "alice", "pw123"
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/login":
+                body, code = (b'<form action="/login" method="post">'
+                              b'<input name="u" type="text"><input name="p" type="password">'
+                              b'</form>'), 200
+            elif self.path == "/account":   # authenticated-only
+                ok = "sid=ok" in self.headers.get("Cookie", "")
+                body, code = (b"ACCOUNT SECRET" if ok else b"login required"), (200 if ok else 401)
+            else:
+                body, code = b"home", 200
+            self.send_response(code); self.end_headers(); self.wfile.write(body)
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            ok = "u=alice" in self.rfile.read(n).decode()
+            self.send_response(302 if ok else 403)
+            if ok:
+                self.send_header("Set-Cookie", "sid=ok")
+            self.send_header("Location", "/"); self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        scope = Scope(ips=["127.0.0.1"], authorized_by="o", mode="dev",
+                      auth={"login_url": f"{base}/login",
+                            "accounts": [{"user_env": "RT_USER", "pass_env": "RT_PASS",
+                                          "role": "user"}]})
+        unauth = Agent(scope, base)
+        assert unauth.http_probe(f"{base}/account")["status"] == 401   # logged out → blocked
+        a = Agent(scope, base)
+        a.session = auth.login(scope)                                  # what assess() now does
+        r = a.http_probe(f"{base}/account")
+        assert r["status"] == 200 and "ACCOUNT SECRET" in r["snippet"]  # authenticated surface
+    finally:
+        srv.shutdown()
+
+
+def test_scope_for_uses_configured_auth():
+    # the web/chat flow must pick up scope.yaml's auth block (not drop it)
+    import os
+    from metsec import runs
+    with tempfile.TemporaryDirectory() as d:
+        Path(d, "scope.yaml").write_text(
+            "authorized_by: owner\nmode: prod\nips:\n  - 127.0.0.1\n"
+            "auth:\n  login_url: http://127.0.0.1:8000/login\n"
+            "  accounts:\n    - {user_env: U, pass_env: P, role: user}\n")
+        cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            s = runs.scope_for("http://127.0.0.1:8000/app", "dev", "operator")
+        finally:
+            os.chdir(cwd)
+        assert s.auth.get("accounts"), "scope_for dropped the configured auth"
+        assert s.auth["accounts"][0]["user_env"] == "U" and s.mode == "dev"  # mode overridden
+
+
 def test_graceful_stop_halts_without_calling_model():
     # a cooperative stop requested before/between turns breaks the loop immediately — the
     # model is never called again, already-recorded findings are kept, and cancelled is set
