@@ -165,15 +165,72 @@ def _scan_source(root: str) -> list[dict]:
     return findings
 
 
+# ---------------------------- dependencies ----------------------------------
+# Three distinct notions, never conflated (a range in a manifest is NOT an installed version):
+#   declared : the CONSTRAINT written in a manifest  (package.json "^1.2.3", requirements ">=1")
+#   resolved : the exact version pinned by a LOCKFILE (package-lock.json, a == pin)
+#   observed : a version actually seen in an environment (SBOM / runtime) — rarely available here
+# `version` is the best exact version for an OSV lookup: resolved first, else an exact pin,
+# else "" (a bare range can't be looked up exactly and must NOT be guessed).
+
+def _dep(name, ecosystem, declared="", resolved="", observed="", source=""):
+    return {"name": name, "ecosystem": ecosystem, "declared": declared,
+            "resolved": resolved, "observed": observed,
+            "version": resolved or observed or (declared if _is_exact(declared, ecosystem) else ""),
+            "source_file": source}
+
+
+def _is_exact(spec: str, ecosystem: str) -> bool:
+    """True if a declared spec already pins one exact version (per the ecosystem's grammar)."""
+    s = (spec or "").strip()
+    if not s:
+        return False
+    if ecosystem == "npm":
+        return bool(re.fullmatch(r"\d+\.\d+\.\d+(?:[-+].*)?", s))  # no ^ ~ > < || x *
+    if ecosystem == "PyPI":
+        return s.startswith("==") and "*" not in s
+    return bool(re.fullmatch(r"\d[\w.\-]*", s))
+
+
+def _npm_lock(path: Path) -> dict:
+    """{name: resolved version} from a package-lock.json (v1 'dependencies' or v2/v3 'packages')."""
+    try:
+        data = json.loads(path.read_text(errors="ignore"))
+    except ValueError:
+        return {}
+    out = {}
+    for key, node in (data.get("packages") or {}).items():       # v2/v3
+        if key.startswith("node_modules/") and node.get("version"):
+            out[key.rsplit("node_modules/", 1)[-1]] = node["version"]
+    for name, node in (data.get("dependencies") or {}).items():  # v1
+        if isinstance(node, dict) and node.get("version"):
+            out.setdefault(name, node["version"])
+    return out
+
+
 def _parse_deps(root: str) -> list[dict]:
-    deps = []
+    deps: list[dict] = []
+    # resolve npm lockfiles first, so a package.json range can be married to its locked version
+    npm_locked: dict[str, str] = {}
+    for lf in Path(root).rglob("package-lock.json"):
+        if not (_SKIP_DIRS & set(lf.parts)):
+            npm_locked.update(_npm_lock(lf))
+
     for rf in Path(root).rglob("requirements*.txt"):
         if _SKIP_DIRS & set(rf.parts):
             continue
         for line in rf.read_text(errors="ignore").splitlines():
-            m = re.match(r"([A-Za-z0-9_.\-]+)\s*==\s*([0-9][\w.\-]*)", line.split("#")[0].strip())
-            if m:
-                deps.append({"name": m.group(1).lower(), "version": m.group(2), "ecosystem": "PyPI"})
+            s = line.split("#")[0].strip()
+            m = re.match(r"([A-Za-z0-9_.\-]+)\s*(==|>=|<=|~=|!=|>|<)?\s*([0-9][\w.\-]*)?", s)
+            if not m or not m.group(1) or not m.group(3):
+                continue
+            op, ver = m.group(2) or "", m.group(3)
+            declared = f"{op}{ver}"
+            # a == pin is exact → it IS the resolved version; a range stays declared-only
+            resolved = ver if op == "==" else ""
+            deps.append(_dep(m.group(1).lower(), "PyPI", declared=declared,
+                             resolved=resolved, source=str(rf)))
+
     for pj in Path(root).rglob("package.json"):
         if _SKIP_DIRS & set(pj.parts):
             continue
@@ -182,10 +239,46 @@ def _parse_deps(root: str) -> list[dict]:
         except ValueError:
             continue
         for sec in ("dependencies", "devDependencies"):
-            for name, ver in (data.get(sec) or {}).items():
-                deps.append({"name": name, "ecosystem": "npm",
-                             "version": re.sub(r"[^0-9.].*$", "", str(ver).lstrip("^~"))})
+            for name, spec in (data.get(sec) or {}).items():
+                deps.append(_dep(name, "npm", declared=str(spec),
+                                 resolved=npm_locked.get(name, ""), source=str(pj)))
+    deps += _parse_sbom(root)
     return deps
+
+
+def _parse_sbom(root: str) -> list[dict]:
+    """Import an SBOM — CycloneDX (1.4/1.5 JSON) or SPDX (2.2/2.3 JSON) — as OBSERVED components.
+    Format versions are read explicitly; an unsupported one is skipped (not silently trusted)."""
+    _ECO = {"pypi": "PyPI", "npm": "npm", "cargo": "crates.io", "golang": "Go",
+            "maven": "Maven", "gem": "RubyGems", "composer": "Packagist", "nuget": "NuGet"}
+
+    def eco_from_purl(purl: str) -> str:
+        m = re.match(r"pkg:([^/]+)/", purl or "")
+        return _ECO.get(m.group(1).lower(), "") if m else ""
+
+    out = []
+    for f in list(Path(root).rglob("*.cdx.json")) + list(Path(root).rglob("bom.json")) \
+            + list(Path(root).rglob("*.spdx.json")):
+        if _SKIP_DIRS & set(f.parts):
+            continue
+        try:
+            data = json.loads(f.read_text(errors="ignore"))
+        except ValueError:
+            continue
+        fmt = str(data.get("bomFormat", "") or data.get("spdxVersion", ""))
+        spec = str(data.get("specVersion", "") or data.get("spdxVersion", ""))
+        if data.get("bomFormat") == "CycloneDX" and spec in ("1.4", "1.5", "1.6"):
+            for c in data.get("components", []):
+                eco = eco_from_purl(c.get("purl", ""))
+                if c.get("name") and c.get("version"):
+                    out.append(_dep(c["name"], eco or "", observed=c["version"], source=str(f)))
+        elif str(data.get("spdxVersion", "")) in ("SPDX-2.2", "SPDX-2.3"):
+            for p in data.get("packages", []):
+                if p.get("name") and p.get("versionInfo"):
+                    out.append(_dep(p["name"], "", observed=p["versionInfo"], source=str(f)))
+        # else: unsupported SBOM version → skipped, not trusted
+        _ = fmt
+    return out
 
 
 def _sem_sev(s: str) -> str:
@@ -243,7 +336,12 @@ if __name__ == "__main__":  # self-check: python -m metsec.static (offline)
             "    pickle.loads(name)\n"
             "SECRET_KEY = 'dev-secret-key-change-me'\n"
             "app.run(debug=True)\n")
-        (Path(d) / "requirements.txt").write_text("requests==2.19.1\nJinja2==2.10\n")
+        (Path(d) / "requirements.txt").write_text("requests==2.19.1\nurllib3>=1.0\n")
+        # npm: a RANGE in the manifest must not be read as an installed version — the lockfile is
+        (Path(d) / "package.json").write_text(json.dumps(
+            {"dependencies": {"lodash": "^4.17.4"}}))
+        (Path(d) / "package-lock.json").write_text(json.dumps(
+            {"lockfileVersion": 3, "packages": {"node_modules/lodash": {"version": "4.17.21"}}}))
         out = analyze(d)
         fs = out["code_findings"]
         rules = {f["rule"] for f in fs}
@@ -251,8 +349,22 @@ if __name__ == "__main__":  # self-check: python -m metsec.static (offline)
                 "code-exec", "deserialization", "hardcoded-secret", "debug-enabled"} <= rules, rules
         # precision win: the parameterized execute is NOT flagged, only the concatenated one
         assert sum(f["rule"] == "sql-injection" for f in fs) == 1, fs
-        names = {dep["name"] for dep in out["deps"]}
-        assert names == {"requests", "jinja2"} and out["deps"][0]["version"] == "2.19.1", out["deps"]
+        deps = {d["name"]: d for d in out["deps"]}
+        # a == pin is exact → resolved; a range is declared-only, no guessed version
+        assert deps["requests"]["resolved"] == "2.19.1" and deps["requests"]["version"] == "2.19.1"
+        assert deps["urllib3"]["declared"] == ">=1.0" and deps["urllib3"]["resolved"] == ""
+        assert deps["urllib3"]["version"] == "", "a bare range must not become an exact version"
+        # npm: declared range preserved, resolved comes from the lockfile (NOT from '^4.17.4')
+        assert deps["lodash"]["declared"] == "^4.17.4"
+        assert deps["lodash"]["resolved"] == "4.17.21" and deps["lodash"]["version"] == "4.17.21"
+
+    # SBOM import: CycloneDX components land as OBSERVED versions with the right ecosystem
+    with tempfile.TemporaryDirectory() as d2:
+        (Path(d2) / "bom.json").write_text(json.dumps({
+            "bomFormat": "CycloneDX", "specVersion": "1.5",
+            "components": [{"name": "flask", "version": "2.0.1", "purl": "pkg:pypi/flask@2.0.1"}]}))
+        sbom = {c["name"]: c for c in analyze(d2)["deps"]}
+        assert sbom["flask"]["observed"] == "2.0.1" and sbom["flask"]["ecosystem"] == "PyPI"
 
     sg = {"results": [{"path": "a.js", "check_id": "javascript.lang.security.audit.xss",
           "start": {"line": 12}, "extra": {"severity": "ERROR", "message": "XSS sink",
