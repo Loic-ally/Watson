@@ -26,27 +26,77 @@ GUESS_ECOSYSTEMS = ["npm", "PyPI", "Go", "Maven", "crates.io", "RubyGems", "Pack
 
 # ------------------------------- OSV ----------------------------------------
 
+def _osv_cvss(sev_list: list) -> tuple[float, str]:
+    """OSV `severity[].score` holds the CVSS *vector*, not a label. Return (base_score, vector),
+    deriving the numeric base score from the vector when a library is available (else 0.0)."""
+    vector = next((s.get("score", "") for s in sev_list
+                   if s.get("score", "").startswith("CVSS:")), "")
+    if not vector:
+        vector = next((s.get("score", "") for s in sev_list if s.get("score")), "")
+    score = 0.0
+    if vector.startswith("CVSS:"):
+        try:
+            from cvss import CVSS3
+            score = float(CVSS3(vector).base_score)
+        except Exception:  # noqa: BLE001 — no cvss lib / malformed; keep the vector, score stays 0
+            pass
+    return score, vector
+
+
+def _osv_affected(v: dict, name: str) -> tuple[list[str], list[str]]:
+    """Preserve OSV applicability: affected version ranges AND the versions that fix them."""
+    ranges, fixed = [], []
+    for aff in v.get("affected", []):
+        pkg = aff.get("package", {}).get("name", "") or name
+        for rng in aff.get("ranges", []):
+            intro = fx = ""
+            for ev in rng.get("events", []):
+                if ev.get("introduced"):
+                    intro = ev["introduced"]
+                if ev.get("fixed"):
+                    fx = ev["fixed"]
+                    fixed.append(fx)
+            ranges.append(f"{pkg} introduced {intro or '0'}"
+                          + (f", fixed {fx}" if fx else ", no fix"))
+    # de-dup preserving order
+    return list(dict.fromkeys(ranges)), list(dict.fromkeys(fixed))
+
+
 def _parse_osv(data: dict, name: str, version: str) -> list[dict]:
     out = []
     for v in data.get("vulns", []):
-        sev = next((s.get("score", "") for s in v.get("severity", []) if s.get("score")), "")
+        score, vector = _osv_cvss(v.get("severity", []))
         refs = [r["url"] for r in v.get("references", []) if r.get("url")][:5]
+        ranges, fixed = _osv_affected(v, name)
         out.append(_record(
             id=v.get("id", ""), source="osv",
             summary=(v.get("summary") or v.get("details", ""))[:300],
             products=f"{name} {version}",
+            aliases=v.get("aliases", []) or [],
+            cwe_ids=v.get("database_specific", {}).get("cwe_ids", []) or [],
             cwe=",".join(v.get("database_specific", {}).get("cwe_ids", []) or []),
-            severity=sev, references=refs or None,
+            cvss=score, cvss_vector=vector, severity="",  # OSV gives a vector, not a label
+            affected_ranges=ranges, fixed_versions=fixed,
+            published=v.get("published", ""), modified=v.get("modified", ""),
+            references=refs or None,
         ))
     return out
 
 
+class SourceError(Exception):
+    """The source could not be reached — distinct from 'the source returned no results'."""
+
+
 def osv_query(name: str, version: str, ecosystem: str) -> list[dict]:
+    """Returns the (possibly empty) list of vulns. Raises SourceError on a transport failure,
+    so callers can tell 'nothing known' apart from 'we could not ask'."""
     payload = {"version": version, "package": {"name": name, "ecosystem": ecosystem}}
     try:
-        data = requests.post(OSV_API, json=payload, timeout=30).json()
-    except requests.RequestException:
-        return []
+        resp = requests.post(OSV_API, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError) as e:
+        raise SourceError(f"OSV unreachable: {str(e)[:120]}") from e
     return _parse_osv(data, name, version)
 
 
@@ -171,7 +221,7 @@ def web_research(name: str, version: str, k: int = 6, fetch_pages: int = 3) -> l
         out.append(_record(
             id=vid or f"WEB-{name}-{abs(hash(summary)) % 10**8}",
             source="web", summary=summary, products=f"{name} {version}",
-            severity=it.get("severity", ""),
+            severity=it.get("severity", ""), candidate=True,  # web-sourced → not yet substantiated
             references=[it["url"]] if it.get("url") else None,
         ))
     return out
@@ -181,21 +231,35 @@ def web_research(name: str, version: str, k: int = 6, fetch_pages: int = 3) -> l
 
 def research(name: str, version: str, ecosystem: str | None = None,
              use_web: bool = True) -> list[dict]:
-    """Combine OSV + web research for one tech+version. Deduped by CVE/vuln id."""
+    """Combine OSV + web research for one tech+version. Deduped by id/alias.
+
+    A source that is unreachable (SourceError) is reported via a synthetic record with
+    source='error' rather than silently looking like 'no vulnerabilities' — the caller can
+    then tell 'nothing known' apart from 'could not ask'. A later fixed version is preserved
+    as applicability data, NOT treated as proof the queried version is exploitable."""
     findings: list[dict] = []
+    errors: list[str] = []
     for eco in ([ecosystem] if ecosystem else GUESS_ECOSYSTEMS):
-        hits = osv_query(name, version, eco)
+        try:
+            hits = osv_query(name, version, eco)
+        except SourceError as e:
+            errors.append(str(e))
+            continue
         if hits:
             findings += hits
             break
     if use_web:
         findings += web_research(name, version)
+    if not findings and errors:
+        findings.append(_record(id=f"ERROR-{name}", source="error",
+                                summary="; ".join(errors)[:300], products=f"{name} {version}"))
 
     seen, deduped = set(), []
     for f in findings:
-        if f["id"] in seen:
+        ids = {f["id"], *(f.get("aliases") or [])}
+        if seen & ids:
             continue
-        seen.add(f["id"])
+        seen |= ids
         deduped.append(f)
     return deduped
 
@@ -214,16 +278,25 @@ if __name__ == "__main__":  # offline self-check: python -m metsec.research
     sample = {"vulns": [{
         "id": "GHSA-jf85-cpcp-j695",
         "summary": "Prototype Pollution in lodash",
-        "severity": [{"type": "CVSS_V3", "score": "9.1"}],
+        "aliases": ["CVE-2019-10744"],
+        "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
         "references": [{"url": "https://github.com/advisories/GHSA-jf85-cpcp-j695"}],
         "database_specific": {"cwe_ids": ["CWE-1321"]},
+        "published": "2019-07-19T00:00:00Z",
+        "affected": [{"package": {"name": "lodash", "ecosystem": "npm"},
+                      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"},
+                                                               {"fixed": "4.17.12"}]}]}],
     }]}
     recs = _parse_osv(sample, "lodash", "4.17.4")
     assert len(recs) == 1
     r = recs[0]
     assert r["id"] == "GHSA-jf85-cpcp-j695" and r["source"] == "osv"
-    assert r["severity"] == "9.1" and r["cwe"] == "CWE-1321"
-    assert "lodash 4.17.4" in r["products"]
+    assert r["cwe"] == "CWE-1321" and r["cwe_ids"] == ["CWE-1321"]
+    # vector kept distinct from the (absent) qualitative label; applicability preserved
+    assert r["cvss_vector"].startswith("CVSS:3.1/") and r["severity"] == ""
+    assert r["aliases"] == ["CVE-2019-10744"]
+    assert "4.17.12" in r["fixed_versions"] and any("fixed 4.17.12" in x for x in r["affected_ranges"])
+    assert r["published"].startswith("2019") and "lodash 4.17.4" in r["products"]
 
     assert _json_array('junk [{"id":"CVE-1"}] tail') == [{"id": "CVE-1"}]
     assert _json_array("not json") == []

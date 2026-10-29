@@ -31,17 +31,77 @@ _CATASTROPHIC = re.compile(
     r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b|:\(\)\s*\{\s*:\|:", re.I)
 
 
+# Finding status — a small state machine, enforced in record_finding():
+#   potential : reported, not yet backed by a collected observation (default)
+#   verified  : backed by a real Observation the agent itself collected (not model text)
+#   refuted   : a test showed the condition does NOT hold
+# (a *hypothesis* — an unproven idea — is a separate object, Hypothesis.)
+FINDING_STATUSES = ("potential", "verified", "refuted")
+# Confidence in the EVIDENCE, kept separate from qualitative severity and from CVSS.
+STATUS_CONFIDENCE = {"verified": "confirmed", "potential": "unconfirmed",
+                     "refuted": "refuted"}
+
+
+# Tools whose successful result is real, target-touching evidence (→ an Observation the
+# agent can cite to verify a finding). Knowledge/planning tools (search_vulns, hypothesize,
+# make_payload, get_evidence) are NOT evidence of a condition on the target.
+EVIDENCE_TOOLS = {"http_probe", "run_command", "establish_foothold", "upload_shell",
+                  "privesc_scan", "pivot_scan", "loot", "browse", "browser_action"}
+
+_CVSS_VECTOR = re.compile(r"^CVSS:(2\.0|3\.0|3\.1|4\.0)/", re.I)
+
+
+def _clean_cvss(c: dict | None) -> dict:
+    """Keep a CVSS only when it is authentic: a version, a provenance, and (when a score
+    is given) a valid vector. Otherwise drop it — never fabricate a number. Returns {} for
+    'not available' (reports render that as null / n/a, never an implicit 0)."""
+    if not isinstance(c, dict) or not c:
+        return {}
+    vector = str(c.get("vector", "") or "")
+    version = str(c.get("version", "") or "")
+    prov = str(c.get("provenance", "") or c.get("source", "") or "")
+    if vector and _CVSS_VECTOR.match(vector):
+        version = version or vector.split("/", 1)[0].split(":", 1)[1]
+    elif vector:
+        return {}  # a vector was claimed but it is malformed → reject the whole score
+    score = c.get("base_score", c.get("score"))
+    try:
+        score = round(float(score), 1) if score is not None and score != "" else None
+    except (TypeError, ValueError):
+        score = None
+    if not version or not prov or (score is None and not vector):
+        return {}
+    return {"version": version, "base_score": score, "vector": vector, "provenance": prov}
+
+
+@dataclass
+class Observation:
+    """One fact the agent actually collected from the target — the evidence a
+    `verified` finding must point at. System-generated, never free model text."""
+    id: str                       # stable: OBS-1, OBS-2, …
+    tool: str                     # the tool that produced it (http_probe, run_command, …)
+    asset: str                    # WHAT it concerns: url / host / target
+    result: str                   # short result summary (status code, output head)
+    ts: float = 0.0               # epoch seconds
+    audit: str = ""               # audit-log file this run wrote to (traceability)
+    source: str = "agent"         # observation source (tool class)
+    detail: dict = field(default_factory=dict)  # structured raw (status, length, …)
+
+
 @dataclass
 class Finding:
     title: str
-    severity: str = "info"       # info | low | medium | high | critical
-    status: str = "potential"    # potential | verified
+    severity: str = "info"       # info | low | medium | high | critical (qualitative)
+    status: str = "potential"    # potential | verified | refuted (see FINDING_STATUSES)
     affected: str = ""           # WHERE the flaw is (endpoint/param/file:line)
     evidence: str = ""
     remediation: str = ""
     refs: list = field(default_factory=list)
     exploitation: str = ""       # HOW it is exploited (technique + steps)
     probe: dict = field(default_factory=dict)   # the exact proving request, for re-validation
+    observations: list = field(default_factory=list)  # ids of the Observations that back it
+    confidence: str = "unconfirmed"   # evidence confidence (derived from status)
+    cvss: dict = field(default_factory=dict)  # authentic CVSS only: {version,base_score,vector,provenance}
 
 
 @dataclass
@@ -69,9 +129,16 @@ class Agent:
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
         self.done = False    # the agent declares the assessment complete
         self._calls: dict = {}  # repeat guard
+        self.observations: list[Observation] = []  # evidence the agent actually collected
+        self._obs_by_id: dict[str, Observation] = {}
 
     def search_vulns(self, tech: str, version: str = "") -> list[dict]:
-        """Known vulns for a tech+version (OSV/web research + the CVE index)."""
+        """Known vulns for a tech+version (OSV/web research + the CVE index).
+
+        Preserves the fields analysis needs — canonical id + aliases, source/provenance,
+        references, KEV, CVSS score AND vector (kept distinct from the qualitative severity
+        label), product, searched version, applicability (affected/fixed ranges) and dates.
+        Web-sourced hits are marked candidate=True (not yet substantiated)."""
         from .research import research
 
         hits = research(tech, version) if version else []
@@ -84,12 +151,27 @@ class Agent:
 
         out, seen = [], set()
         for h in hits:
-            if h["id"] in seen:
+            hid = h.get("id", "")
+            if not hid or hid in seen:
                 continue
-            seen.add(h["id"])
-            item = {"id": h["id"], "summary": h["summary"][:200],
-                    "severity": h.get("severity", "")}
-            ex = exploits_for(h["id"])  # public exploit available? (big prioritization signal)
+            seen.add(hid)
+            item = {"id": hid, "summary": (h.get("summary") or "")[:300],
+                    "source": h.get("source", ""),
+                    "aliases": h.get("aliases") or [],
+                    "severity": h.get("severity", ""),           # qualitative label
+                    "cvss": h.get("cvss") or None,               # numeric base score (may be None)
+                    "cvss_vector": h.get("cvss_vector", ""),     # the vector, kept separate
+                    "kev": bool(h.get("kev", False)),
+                    "product": h.get("products", ""),
+                    "searched_version": version,
+                    "applicability": {"affected_ranges": h.get("affected_ranges") or [],
+                                      "fixed_versions": h.get("fixed_versions") or []},
+                    "cwe_ids": h.get("cwe_ids") or ([h["cwe"]] if h.get("cwe") else []),
+                    "references": h.get("references") or [],
+                    "published": h.get("published", ""), "modified": h.get("modified", "")}
+            if h.get("candidate"):
+                item["candidate"] = True   # web-sourced, not yet substantiated
+            ex = exploits_for(hid)  # public exploit available? (big prioritization signal)
             if ex:
                 item["public_exploits"] = [{"id": e["id"], "url": e["url"],
                                             "metasploit": e["metasploit"]} for e in ex[:3]]
@@ -129,11 +211,45 @@ class Agent:
                        status: str = "potential", affected: str = "",
                        evidence: str = "", remediation: str = "",
                        refs: list | None = None, exploitation: str = "",
-                       probe: dict | None = None) -> dict:
-        self.findings.append(Finding(title, severity, status, affected, evidence,
-                                     remediation, refs or [], exploitation, probe or {}))
+                       probe: dict | None = None, observations: list | None = None,
+                       cvss: dict | None = None) -> dict:
+        """Record a finding. `verified` is EARNED, not asserted: it requires at least one
+        `observations` id that references a real Observation this agent collected. A
+        model claiming `verified` with only free text is clamped to `potential`."""
+        status = status if status in FINDING_STATUSES else "potential"
+        linked = [o for o in (observations or []) if o in self._obs_by_id]
+        downgraded = False
+        if status == "verified" and not linked:
+            status, downgraded = "potential", True
+        confidence = STATUS_CONFIDENCE[status]
+        if downgraded:
+            evidence = (evidence + " [status: reported as verified but no collected "
+                        "observation was linked — kept as potential]").strip()
+        f = Finding(title, severity, status, affected, evidence, remediation,
+                    refs or [], exploitation, probe or {}, linked, confidence,
+                    _clean_cvss(cvss))
+        self.findings.append(f)
         events.emit("finding", severity=severity, status=status, title=title[:120])
-        return {"recorded": True, "count": len(self.findings)}
+        return {"recorded": True, "count": len(self.findings), "status": status,
+                "linked_observations": linked,
+                **({"note": "verified requires a linked observation id; recorded as potential"}
+                   if downgraded else {})}
+
+    def get_evidence(self, id: str) -> dict:
+        """Look up the full detail of an observation or an indexed vuln by stable id —
+        so heavy evidence can be inspected on demand instead of bloating every prompt."""
+        if id in self._obs_by_id:
+            o = self._obs_by_id[id]
+            return {"kind": "observation", "id": o.id, "tool": o.tool, "asset": o.asset,
+                    "result": o.result, "ts": o.ts, "audit": o.audit, "detail": o.detail}
+        try:
+            from .rag import CveIndex
+            hit = CveIndex().get(id)
+            if hit:
+                return {"kind": "vuln", **hit}
+        except Exception:  # noqa: BLE001 — index optional
+            pass
+        return {"error": f"no observation or vuln with id {id!r}"}
 
     def establish_foothold(self, url: str, param: str, kind: str = "auto",
                            base: str = "127.0.0.1") -> dict:
@@ -298,7 +414,7 @@ class Agent:
         else:
             fn = {"search_vulns": self.search_vulns, "http_probe": self.http_probe,
                   "finish": self.finish,
-                  "record_finding": self.record_finding,
+                  "record_finding": self.record_finding, "get_evidence": self.get_evidence,
                   "establish_foothold": self.establish_foothold,
                   "run_command": self.run_command, "privesc_scan": self.privesc_scan,
                   "loot": self.loot, "hypothesize": self.hypothesize,
@@ -314,8 +430,26 @@ class Agent:
                     result = {"error": f"out of scope: {e}"}
                 except TypeError as e:
                     result = {"error": f"bad args: {e}"}
+        if name in EVIDENCE_TOOLS and isinstance(result, dict) and "error" not in result:
+            obs = self._record_observation(name, args, result)
+            result = {**result, "observation_id": obs.id}  # the model cites this to verify
         audit.log("call", tool=name, args=args, result=_json.dumps(result, default=str)[:300])
         return result
+
+    def _record_observation(self, tool: str, args: dict, result: dict) -> "Observation":
+        import time
+        oid = f"OBS-{len(self.observations) + 1}"
+        asset = str(args.get("url") or args.get("upload_url") or self.target)
+        summary = result.get("whoami") or result.get("output") or result.get("vision") \
+            or (f"status={result.get('status')} len={result.get('length')} "
+                f"reflected={result.get('reflected')}" if "status" in result else "")
+        o = Observation(id=oid, tool=tool, asset=asset, result=str(summary)[:300],
+                        ts=round(time.time(), 3), audit=audit.path() or "",
+                        source=tool, detail={k: v for k, v in result.items()
+                                             if k in ("status", "length", "reflected", "kind")})
+        self.observations.append(o)
+        self._obs_by_id[oid] = o
+        return o
 
 
 TOOLS = [
@@ -339,22 +473,40 @@ TOOLS = [
             "required": ["url"]}}},
     {"type": "function", "function": {
         "name": "record_finding",
-        "description": "Record ONE grounded security finding backed by evidence you gathered.",
+        "description": "Record ONE grounded security finding backed by evidence you gathered. "
+                       "status 'verified' is ONLY accepted when you link at least one "
+                       "`observations` id returned by a probing tool — you cannot mark a finding "
+                       "verified from text alone (it will be kept as 'potential'). Use 'refuted' "
+                       "when a test showed the condition does not hold.",
         "parameters": {"type": "object", "properties": {
             "title": {"type": "string"},
-            "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
-            "status": {"type": "string", "enum": ["potential", "verified"]},
+            "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"],
+                         "description": "qualitative risk — NOT a CVSS number"},
+            "status": {"type": "string", "enum": ["potential", "verified", "refuted"]},
             "affected": {"type": "string", "description": "WHERE: endpoint/param/file:line"},
             "evidence": {"type": "string"},
             "exploitation": {"type": "string",
                              "description": "HOW it is exploited: the technique and concrete steps"},
             "remediation": {"type": "string"},
             "refs": {"type": "array", "items": {"type": "string"}},
+            "observations": {"type": "array", "items": {"type": "string"},
+                             "description": "ids (OBS-N) of the probing-tool results that back this "
+                             "finding — REQUIRED to mark it 'verified'"},
+            "cvss": {"type": "object", "description": "ONLY an authentic CVSS from a source "
+                     "(NVD/OSV/vendor): {version, base_score, vector, provenance}. Omit it rather "
+                     "than inventing a number — severity already carries qualitative risk."},
             "probe": {"type": "object", "description": "for a VERIFIED finding, the exact request "
                       "that proves it so it can be re-validated: {url, method, param, value, "
                       "cookie, expect} where expect is a status code or a substring the response "
                       "must contain"}},
             "required": ["title", "severity"]}}},
+    {"type": "function", "function": {
+        "name": "get_evidence",
+        "description": "Fetch the full detail of an observation (OBS-N) you collected, or of an "
+                       "indexed vulnerability by its exact id (CVE/GHSA), without bloating the "
+                       "conversation. Use it to inspect evidence before recording a finding.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}},
+                       "required": ["id"]}}},
     {"type": "function", "function": {
         "name": "establish_foothold",
         "description": "After confirming a web RCE (command injection or SSTI), turn it into "
@@ -475,7 +627,11 @@ SYSTEM = (
     "finding, also pass `probe` = the exact request that proves it ({url, method, param, value, "
     "cookie, expect}) so it can be re-validated. Actively "
     "connect the dots: when two observations might relate, call hypothesize to record the link "
-    "and what would test it, then test it. Never invent vulnerabilities. YOU decide when the "
+    "and what would test it, then test it. Never invent vulnerabilities. To mark a finding "
+    "'verified' you MUST pass `observations` = the id(s) (OBS-N) returned by the probing tool(s) "
+    "that proved it — a claim without a linked observation is kept as 'potential'. Do NOT put a "
+    "CVSS number in `severity`; pass a `cvss` object only when a source (NVD/OSV/vendor) gives a "
+    "real vector. YOU decide when the "
     "assessment is complete: call finish(summary) once you have reached the objective (e.g. "
     "root) or exhausted productive leads. Do NOT re-probe what you already tested — each call "
     "should test something new."
@@ -515,6 +671,28 @@ def _inventory_json(inv: dict) -> dict:
     return out
 
 
+def _select_inventory(inv) -> dict:
+    """Trim a recon inventory to a prompt-sized BUT structurally-valid subset — cap the
+    long lists by count, never by slicing the serialized JSON mid-structure (which would
+    corrupt ids/refs). Keeps the fields the model needs to act: tech+versions, endpoints/
+    forms, deps, and the strongest code findings (with file:line/rule/refs intact)."""
+    if not isinstance(inv, dict):
+        return inv
+    out = dict(inv)
+    if isinstance(out.get("techs"), list):
+        out["techs"] = out["techs"][:40]
+    if isinstance(out.get("crawl"), dict):
+        c = out["crawl"]
+        out["crawl"] = {"forms": c.get("forms", [])[:20], "endpoints": c.get("endpoints", [])[:40]}
+    if isinstance(out.get("deps"), list):
+        out["deps"] = out["deps"][:80]
+    if isinstance(out.get("code_findings"), list):
+        rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        out["code_findings"] = sorted(
+            out["code_findings"], key=lambda f: rank.get(f.get("severity"), 9))[:60]
+    return out
+
+
 def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
     import json
 
@@ -551,7 +729,7 @@ def run_agent(agent: Agent, inventory: dict) -> list[Finding]:
 
     mem = inventory.get("_memory", "") if isinstance(inventory, dict) else ""
     inv_dump = {k: v for k, v in inventory.items() if k != "_memory"} if isinstance(inventory, dict) else inventory
-    user = (f"Recon inventory for {agent.target}:\n" + json.dumps(inv_dump, default=str)[:7000]
+    user = (f"Recon inventory for {agent.target}:\n" + json.dumps(_select_inventory(inv_dump), default=str)
             + "\n\nInvestigate with the tools and record grounded findings. Stop when done.")
     if mem:
         user = mem + "\n\n" + user
@@ -606,9 +784,10 @@ def assess(target: str | None, scope, active: bool = False, budget: int = 16,
     run_agent(agent, inv)
     if revalidate:
         from .revalidate import revalidate as _reval
-        st = _reval(agent.findings, scope)
+        st = _reval(agent.findings, scope, exploit=exploit)
         events.emit("tool", name="revalidate",
-                    detail=f"{st['reproduced']} reproduced, {st['downgraded']} downgraded")
+                    detail=f"{st['reproduced']} reproduced, {st['downgraded']} downgraded, "
+                           f"{st['indeterminate']} indeterminate")
     from dataclasses import asdict as _asdict
     memory.remember(target, [_asdict(f) for f in agent.findings], inv,
                     foothold=agent.channel.kind if agent.channel else "")
@@ -678,10 +857,30 @@ if __name__ == "__main__":  # self-check: python -m metsec.agent (tool gating, o
     assert "destructive" in exp.run_command("rm -rf /")["error"]
     assert "destructive" in exp.run_command("mkfs.ext4 /dev/sda1")["error"]
 
-    dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed",
-                       exploitation="GET /search?q=<payload>, reflected unescaped")
-    assert len(dev.findings) == 1 and dev.findings[0].status == "verified"
-    assert dev.findings[0].exploitation.startswith("GET /search")
+    # 'verified' with NO linked observation is clamped to 'potential' (no self-confirm via text)
+    r = dev.record_finding("Reflected input", "medium", "verified", evidence="XSSMARK echoed",
+                           exploitation="GET /search?q=<payload>, reflected unescaped")
+    assert dev.findings[-1].status == "potential" and "note" in r, r
+    assert dev.findings[-1].confidence == "unconfirmed"
+    # a probe through dispatch records an Observation; linking it earns 'verified'
+    pr = dev.dispatch("http_probe", {"url": f"{base}/search", "method": "GET",
+                                     "param": "q", "value": "XSSMARK"})
+    oid = pr["observation_id"]
+    dev.record_finding("Reflected input (confirmed)", "medium", "verified",
+                       evidence="XSSMARK echoed", observations=[oid])
+    assert dev.findings[-1].status == "verified" and dev.findings[-1].observations == [oid]
+    assert dev.get_evidence(oid)["tool"] == "http_probe"
+    assert "error" in dev.get_evidence("OBS-999")
+    # a fabricated CVSS (no provenance/vector) is dropped; an authentic one is kept
+    dev.record_finding("x", "high", cvss={"base_score": 9.8})
+    assert dev.findings[-1].cvss == {}
+    dev.record_finding("y", "high", cvss={"version": "3.1", "base_score": 9.8,
+                       "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                       "provenance": "NVD"})
+    assert dev.findings[-1].cvss["base_score"] == 9.8 and dev.findings[-1].cvss["provenance"] == "NVD"
+    # refuted is a valid terminal state
+    dev.record_finding("not vulnerable after all", "low", "refuted")
+    assert dev.findings[-1].status == "refuted" and dev.findings[-1].confidence == "refuted"
 
     dev.hypothesize("looted creds may unlock admin", ["f1", "f2"], "replay creds", "confirmed")
     assert len(dev.hypotheses) == 1 and dev.hypotheses[0].status == "confirmed"
