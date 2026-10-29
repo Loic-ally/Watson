@@ -6,7 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api } from "@/api";
 import { cn } from "@/lib/utils";
 
-type Report = { name: string; target: string; date: string; cvss: number; count: number };
+// severity is the qualitative risk; cvss is an AUTHENTIC base score or null (never fabricated)
+type Report = { name: string; target: string; date: string; severity: string; cvss: number | null; count: number };
+
+const SEV_RANK = ["critical", "high", "medium", "low", "info"];
 
 export default function Reports() {
   const [reports, setReports] = useState<Report[] | null>(null);
@@ -15,10 +18,12 @@ export default function Reports() {
     api("/api/reports").then((r) => r.json()).then((d) => setReports(d.reports ?? []));
   }, []);
 
+  const topSeverity =
+    reports?.map((r) => r.severity).filter(Boolean).sort((a, b) => SEV_RANK.indexOf(a) - SEV_RANK.indexOf(b))[0] ?? "—";
   const stats = reports && {
     assessments: reports.length,
     findings: reports.reduce((n, r) => n + (r.count || 0), 0),
-    maxCvss: reports.reduce((m, r) => Math.max(m, r.cvss || 0), 0),
+    topSeverity,
   };
 
   return (
@@ -28,7 +33,7 @@ export default function Reports() {
         <div className="mb-6 grid grid-cols-3 gap-3">
           <Stat label="Assessments" value={stats.assessments} />
           <Stat label="Total findings" value={stats.findings} />
-          <Stat label="Highest CVSS" value={stats.maxCvss.toFixed(1)} danger={stats.maxCvss >= 7} />
+          <Stat label="Highest severity" value={stats.topSeverity} danger={["critical", "high"].includes(stats.topSeverity)} />
         </div>
       )}
       <Card className="p-0">
@@ -37,6 +42,7 @@ export default function Reports() {
             <TableRow>
               <TableHead>Target</TableHead>
               <TableHead>Date</TableHead>
+              <TableHead>Severity</TableHead>
               <TableHead>CVSS</TableHead>
               <TableHead>Findings</TableHead>
               <TableHead>Report</TableHead>
@@ -45,7 +51,7 @@ export default function Reports() {
           <TableBody>
             {reports?.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   No reports yet — run a scan from Chat.
                 </TableCell>
               </TableRow>
@@ -58,14 +64,17 @@ export default function Reports() {
                   </Link>
                 </TableCell>
                 <TableCell>{r.date}</TableCell>
-                <TableCell className="font-bold">{r.cvss}</TableCell>
+                <TableCell>
+                  <span className={`pill sev-${r.severity || "info"}`}>{(r.severity || "—").toUpperCase()}</span>
+                </TableCell>
+                <TableCell className="font-bold tabular-nums">{r.cvss ?? "n/a"}</TableCell>
                 <TableCell>{r.count}</TableCell>
                 <TableCell className="text-muted-foreground">{r.name}</TableCell>
               </TableRow>
             ))}
             {reports === null && (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">Loading…</TableCell>
+                <TableCell colSpan={6} className="text-muted-foreground">Loading…</TableCell>
               </TableRow>
             )}
           </TableBody>

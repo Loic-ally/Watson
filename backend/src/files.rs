@@ -43,6 +43,20 @@ fn valid_report(name: &str) -> bool {
         && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Highest qualitative severity across a (possibly legacy) report's findings — used only when
+/// meta lacks `highest_severity`, so old reports still show a risk level without a fake CVSS.
+fn derive_severity(data: &Value) -> String {
+    const ORDER: [&str; 5] = ["critical", "high", "medium", "low", "info"];
+    data.get("findings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.get("severity").and_then(Value::as_str))
+        .min_by_key(|s| ORDER.iter().position(|o| o == s).unwrap_or(9))
+        .unwrap_or("—")
+        .to_string()
+}
+
 pub async fn api_reports(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     if !authed(&state, &headers) {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -62,11 +76,19 @@ pub async fn api_reports(State(state): State<Arc<AppState>>, headers: HeaderMap)
         let Ok(text) = std::fs::read_to_string(&f) else { continue };
         let Ok(data) = serde_json::from_str::<Value>(&text) else { continue };
         let meta = data.get("meta").cloned().unwrap_or(json!({}));
+        // severity = qualitative risk; cvss = AUTHENTIC base score or null. A legacy report's
+        // heuristic `overall_cvss` is NOT surfaced as a CVSS (it was never source-authenticated).
+        let severity = meta
+            .get("highest_severity")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| derive_severity(&data));
         rows.push(json!({
             "name": name,
             "target": meta.get("target").and_then(Value::as_str).unwrap_or("?"),
             "date": meta.get("date").and_then(Value::as_str).unwrap_or(""),
-            "cvss": meta.get("overall_cvss").cloned().unwrap_or(json!(0)),
+            "severity": severity,
+            "cvss": meta.get("max_authentic_cvss").cloned().unwrap_or(Value::Null),
             "count": data.get("findings").and_then(Value::as_array).map(|a| a.len()).unwrap_or(0),
             "has_html": root().join(&name).join("report.html").exists(),
         }));

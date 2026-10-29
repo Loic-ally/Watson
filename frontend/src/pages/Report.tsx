@@ -7,7 +7,14 @@ import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/api";
 
-type Finding = { severity?: string; cvss?: string; status?: string; title?: string; affected?: string };
+type Cvss = { version?: string; base_score?: number; vector?: string; provenance?: string };
+type Finding = { severity?: string; cvss?: Cvss | number | null; confidence?: string; status?: string; title?: string; affected?: string };
+
+// authentic CVSS only: an object with a base_score + provenance. A legacy float is NOT authentic.
+function cvssLabel(c: Finding["cvss"]): string {
+  if (c && typeof c === "object" && c.base_score != null && c.provenance) return `${c.base_score} (${c.provenance})`;
+  return "n/a";
+}
 
 export default function Report() {
   const { name = "" } = useParams();
@@ -53,6 +60,7 @@ export default function Report() {
               <TableRow>
                 <TableHead>Sev</TableHead>
                 <TableHead>CVSS</TableHead>
+                <TableHead>Confidence</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Finding</TableHead>
                 <TableHead>Where</TableHead>
@@ -60,14 +68,15 @@ export default function Report() {
             </TableHeader>
             <TableBody>
               {findings.length === 0 && (
-                <TableRow><TableCell colSpan={5}>No findings.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6}>No findings.</TableCell></TableRow>
               )}
               {findings.map((f, i) => (
                 <TableRow key={i}>
                   <TableCell>
                     <span className={`pill sev-${f.severity || "info"}`}>{(f.severity || "").toUpperCase()}</span>
                   </TableCell>
-                  <TableCell>{f.cvss}</TableCell>
+                  <TableCell className="tabular-nums">{cvssLabel(f.cvss)}</TableCell>
+                  <TableCell className="text-muted-foreground">{f.confidence ?? "—"}</TableCell>
                   <TableCell>{f.status}</TableCell>
                   <TableCell>{f.title}</TableCell>
                   <TableCell className="text-muted-foreground">{f.affected}</TableCell>

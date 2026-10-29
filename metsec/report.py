@@ -12,22 +12,49 @@ from dataclasses import asdict
 from pathlib import Path
 
 SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-# A consistent CVSS band per severity (verified findings score at the top of the band).
-SEV_CVSS = {"critical": (9.0, 10.0), "high": (7.0, 8.9), "medium": (4.0, 6.9),
-            "low": (0.1, 3.9), "info": (0.0, 0.0)}
+STATUS_CONFIDENCE = {"verified": "confirmed", "potential": "unconfirmed", "refuted": "refuted"}
 
 
-def cvss(f) -> float:
-    lo, hi = SEV_CVSS.get(f.severity, (0.0, 0.0))
-    return round(hi if f.status == "verified" else (lo + hi) / 2, 1)
+def _attr(f, k, default=None):
+    return f.get(k, default) if isinstance(f, dict) else getattr(f, k, default)
 
 
-def overall_score(findings: list) -> float:
-    return max((cvss(f) for f in findings), default=0.0)
+def cvss(f):
+    """The finding's AUTHENTIC CVSS or None — never fabricated from severity/status.
+    Authentic means it carries {version, base_score, vector, provenance} from a source
+    (NVD/OSV/vendor). A legacy report's heuristic number is NOT authentic → returns None.
+    """
+    c = _attr(f, "cvss")
+    if isinstance(c, dict) and c.get("base_score") is not None and c.get("provenance"):
+        return c
+    return None   # legacy float / missing → no authenticated CVSS (render as n/a, never 0)
+
+
+def cvss_display(f) -> str:
+    c = cvss(f)
+    return f"{c['base_score']} ({c.get('version', '?')}, {c['provenance']})" if c else "n/a"
+
+
+def confidence(f) -> str:
+    return STATUS_CONFIDENCE.get(_attr(f, "status", "potential"), "unconfirmed")
+
+
+def highest_severity(findings: list) -> str:
+    """Qualitative overall risk = the most severe finding's severity. No fabricated number."""
+    if not findings:
+        return "none"
+    return min((_attr(f, "severity", "info") for f in findings),
+               key=lambda s: SEV_ORDER.get(s, 9))
+
+
+def max_authentic_cvss(findings: list):
+    """Highest AUTHENTIC base score across findings, or None if none carry one."""
+    scores = [c["base_score"] for f in findings if (c := cvss(f))]
+    return max(scores) if scores else None
 
 
 def _rank(f) -> tuple:
-    return (SEV_ORDER.get(f.severity, 9), 0 if f.status == "verified" else 1)
+    return (SEV_ORDER.get(_attr(f, "severity"), 9), 0 if _attr(f, "status") == "verified" else 1)
 
 
 def dedup_rank(findings: list) -> list:
@@ -59,7 +86,10 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None,
         f"- **Date:** {meta.get('date', '')}",
         *([f"- **Audit log:** {meta['audit']}"] if meta.get("audit") else []),
         f"- **Findings:** {len(findings)} ({badge})" if findings else "- **Findings:** 0",
-        f"- **Overall risk (CVSS):** {overall_score(findings)}",
+        f"- **Overall risk (highest severity):** {highest_severity(findings)}",
+        *([f"- **Highest authenticated CVSS:** {mx}"]
+          if (mx := max_authentic_cvss(findings)) is not None
+          else ["- **CVSS:** not available (no source-authenticated score)"]),
         "", "---", "",
     ]
     if meta.get("narrative"):
@@ -76,7 +106,10 @@ def _markdown(findings: list, meta: dict, hypotheses: list | None = None,
         out += ["", "---", ""]
     for f in findings:
         out.append(f"## [{f.severity.upper()} · {f.status}] {f.title}")
-        out.append(f"- **CVSS:** {cvss(f)}")
+        out.append(f"- **Severity (qualitative):** {f.severity} · "
+                   f"**Evidence confidence:** {confidence(f)}")
+        if cvss(f):
+            out.append(f"- **CVSS:** {cvss_display(f)}")
         if f.affected:
             out.append(f"- **Where:** {f.affected}")
         if getattr(f, "exploitation", ""):
@@ -131,9 +164,10 @@ def _html(findings: list, meta: dict, hypotheses: list, narr: str, shots: list |
         rows = [f'<div class="r"><b>{lbl}:</b> {esc(val)}</div>' for lbl, val in (
             ("Where", f.affected), ("How exploited", getattr(f, "exploitation", "")),
             ("Evidence", f.evidence), ("Fix", f.remediation)) if val]
+        tag = f"CVSS {cvss_display(f)}" if cvss(f) else f"{esc(confidence(f))}"
         cards.append(f'<div class="f" style="border-left-color:{c}"><div class="hd">'
                      f'<span class="sev" style="background:{c}">{esc(f.severity.upper())} · {esc(f.status)}</span>'
-                     f'<b>{esc(f.title)}</b><span class="cv">CVSS {cvss(f)}</span></div>'
+                     f'<b>{esc(f.title)}</b><span class="cv">{tag}</span></div>'
                      + "".join(rows) + "</div>")
     hyps = "".join(f"<li>{esc(h.statement)} <i>({esc(h.status)})</i></li>" for h in hypotheses)
     gallery = ""
@@ -163,8 +197,10 @@ def _html(findings: list, meta: dict, hypotheses: list, narr: str, shots: list |
         f"<p class='meta'>{esc(meta.get('target'))} · mode {esc(meta.get('mode'))} · exploitation "
         f"{'on' if meta.get('exploit') else 'off'} · {esc(meta.get('date'))}<br>authorized by "
         f"{esc(meta.get('authorized_by'))}</p>"
-        f"<p>Overall risk (CVSS): <span class='score'>{overall_score(findings)}</span> — "
-        f"{len(findings)} findings ({esc(badge)})</p>"
+        f"<p>Overall risk: <span class='score'>{esc(highest_severity(findings))}</span> — "
+        f"{len(findings)} findings ({esc(badge)})"
+        + (f" · highest authenticated CVSS {mx}" if (mx := max_authentic_cvss(findings)) is not None
+           else " · no source-authenticated CVSS") + "</p>"
         + (f"<h2>Attack narrative</h2><p>{esc(narr)}</p>" if narr else "")
         + (f"<h2>Hypotheses &amp; attack chain</h2><ul>{hyps}</ul>" if hyps else "")
         + "<h2>Findings</h2>" + ("".join(cards) if cards else "<p>No findings.</p>")
@@ -202,9 +238,12 @@ def write_reports(findings: list, meta: dict, out_dir: str, hypotheses: list | N
     out.mkdir(parents=True, exist_ok=True)
     ranked = dedup_rank(findings)
     shots = _copy_shots(shots or [], out)
-    meta = {**meta, "narrative": narrative, "overall_cvss": overall_score(ranked)}
+    meta = {**meta, "narrative": narrative,
+            "highest_severity": highest_severity(ranked),
+            "max_authentic_cvss": max_authentic_cvss(ranked)}  # None when no authentic score
     data = {"meta": meta, "summary": summarize(ranked),
-            "findings": [{**asdict(f), "cvss": cvss(f)} for f in ranked],
+            "findings": [{**asdict(f), "cvss": cvss(f),  # authentic dict or null
+                          "confidence": confidence(f)} for f in ranked],
             "hypotheses": [asdict(h) for h in (hypotheses or [])],
             "shots": shots}
     jpath, mpath, hpath = out / "findings.json", out / "report.md", out / "report.html"
@@ -227,7 +266,10 @@ def _fallback_html(data: dict) -> str:
     fs = [Finding(title=f.get("title", ""), severity=f.get("severity", "info"),
                   status=f.get("status", "potential"), affected=f.get("affected", ""),
                   evidence=f.get("evidence", ""), remediation=f.get("remediation", ""),
-                  refs=f.get("refs", []), exploitation=f.get("exploitation", ""))
+                  refs=f.get("refs", []), exploitation=f.get("exploitation", ""),
+                  # a legacy report's cvss may be a float → cvss() treats only the authentic
+                  # dict form as real, so an old heuristic number renders as n/a, not CVSS
+                  cvss=f.get("cvss") if isinstance(f.get("cvss"), dict) else {})
           for f in data.get("findings", [])]
     hs = [Hypothesis(**{k: h.get(k) for k in ("statement", "based_on", "test", "status")})
           for h in data.get("hypotheses", [])]
@@ -301,16 +343,22 @@ if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
 
     from .agent import Finding, Hypothesis
 
+    authentic = {"version": "3.1", "base_score": 9.8, "provenance": "NVD",
+                 "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}
     fs = [
         Finding("Reflected XSS", "medium", "potential", affected="/search"),
         Finding("Reflected XSS", "medium", "verified", affected="/search"),  # dup, stronger
-        Finding("Exposed .env", "critical", "verified", affected="/.env"),
+        Finding("Exposed .env", "critical", "verified", affected="/.env", cvss=authentic),
         Finding("Missing headers", "low", "verified"),
     ]
     ranked = dedup_rank(fs)
     assert [f.title for f in ranked] == ["Exposed .env", "Reflected XSS", "Missing headers"], ranked
     assert ranked[1].status == "verified", "kept the stronger duplicate"
     assert summarize(ranked) == {"critical": 1, "medium": 1, "low": 1}
+    # scoring is honest: severity is qualitative, CVSS only when authentic, never fabricated
+    assert cvss(Finding("x", "critical", "verified")) is None, "no fabricated CVSS from severity"
+    assert highest_severity(ranked) == "critical" and max_authentic_cvss(ranked) == 9.8
+    assert confidence(Finding("x", status="potential")) == "unconfirmed"
 
     with tempfile.TemporaryDirectory() as d:
         meta = {"target": "http://x/", "mode": "dev", "exploit": True,
@@ -320,11 +368,25 @@ if __name__ == "__main__":  # self-check: python -m metsec.report (offline)
         j, m, h = write_reports(fs, meta, d, hypotheses=hyps, narrative="chained .env creds to admin")
         data = json.loads(j.read_text())
         assert len(data["findings"]) == 3 and data["meta"]["exploit"] is True
-        assert data["findings"][0]["cvss"] == 10.0 and data["meta"]["overall_cvss"] == 10.0
+        # the .env finding keeps its authentic CVSS; the headers one has none (null, not 0)
+        assert data["findings"][0]["cvss"]["base_score"] == 9.8
+        assert data["findings"][2]["cvss"] is None, "no implicit zero for a missing score"
+        assert data["meta"]["highest_severity"] == "critical"
+        assert data["meta"]["max_authentic_cvss"] == 9.8 and "overall_cvss" not in data["meta"]
         assert data["hypotheses"][0]["status"] == "confirmed"
         md = m.read_text()
-        assert "Exposed .env" in md and "CVSS:" in md and "Attack narrative" in md
+        assert "Exposed .env" in md and "Attack narrative" in md
+        assert "highest severity):** critical" in md
+        assert "Highest authenticated CVSS:** 9.8" in md
+        assert "CVSS:** 0" not in md  # never an implicit zero for missing scores
         assert "Hypotheses & attack chain" in md and "looted DB password" in md
         html = h.read_text()
-        assert "<html" in html and "Exposed .env" in html and "CVSS 10.0" in html
+        assert "<html" in html and "Exposed .env" in html and "CVSS 9.8" in html
+
+    # an OLD report (heuristic float cvss, overall_cvss) is still readable and NOT relabelled
+    legacy = {"meta": {"target": "http://old/", "overall_cvss": 7.5, "narrative": ""},
+              "findings": [{"title": "Legacy", "severity": "high", "status": "verified",
+                            "cvss": 7.5}], "hypotheses": [], "shots": []}
+    old_html = _fallback_html(legacy)
+    assert "Legacy" in old_html and "CVSS 7.5" not in old_html, "legacy heuristic ≠ authentic CVSS"
     print("report self-check ok")
