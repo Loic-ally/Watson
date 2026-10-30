@@ -151,14 +151,10 @@ this way, and pure-Python fallbacks run when neither the host nor Exegol has a g
 narrative, the hypotheses and attack chain, and where/how/fix for each finding. Every tool
 call is also recorded in a JSONL audit log under `.watson_cache/audit/`.
 
-## Practice labs (`testbed/`)
+## Practice labs
 
-Intentionally vulnerable targets for local testing only — run `./testbed/<box>/run.sh`:
-
-- **linux-lab** — web command injection → `sudo find` → root (introductory).
-- **citadel** — SQL-injection auth bypass → admin SSTI RCE → `sudo tar` → root (multi-stage).
-- **obscura** — no known CVE: LFI → source review → custom auth bypass → command injection
-  → unsafe-YAML deserialization privilege escalation → root. The agent must discover the chain.
+The vulnerable practice targets (`testbed/`) and the Blackveil CTF environment live in
+[Loic-ally/Blackveil](https://github.com/Loic-ally/Blackveil).
 
 ## Stack
 
