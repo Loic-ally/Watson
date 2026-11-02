@@ -1,4 +1,6 @@
-<h1 align="center">Watson</h1>
+<p align="center">
+  <img src="assets/watson-logo.png" alt="Watson" width="420">
+</p>
 
 <p align="center">
   <b>An autonomous AI penetration tester for web apps you own.</b><br>
