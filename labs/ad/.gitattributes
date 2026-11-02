@@ -1,5 +1,0 @@
-# The container build and the DC entrypoint run these under /bin/bash — they must keep
-# LF endings regardless of the host's core.autocrlf setting, or bash fails on the CRs.
-*.sh    text eol=lf
-entrypoint.sh text eol=lf
-seed.sh text eol=lf
