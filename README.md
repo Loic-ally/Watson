@@ -39,10 +39,14 @@ warranty of any kind. If you do not agree, do not use Watson.
 - **Linux post-exploitation** — host enumeration, GTFOBins-matched (and reasoned)
   privilege escalation to root, and credential/secret looting.
 - **Lateral movement** — internal-network recon and a SOCKS tunnel through the foothold
-  so probes reach in-scope internal hosts.
+  (forward, or a reverse connect-back tunnel for footholds behind NAT) so probes reach
+  in-scope internal hosts.
 - **Windows & Active Directory** — credential- and network-driven: SMB/LDAP enumeration,
   Kerberoasting and AS-REP roasting, BloodHound collection, remote command execution, and
   secret dumping (local SAM and DCSync) via industry-standard tooling.
+- **Windows local privilege escalation** — maps a host's token privileges (`SeImpersonate`,
+  `SeBackup`, `SeDebug`, …) and powerful group memberships to concrete local-to-SYSTEM
+  techniques, the Windows counterpart of the GTFOBins-matched Linux privesc.
 - **Reporting** — `findings.json`, Markdown and styled HTML, consistent CVSS, a written
   attack narrative, the hypotheses and attack chain, and a rendered PDF.
 - **Operations** — per-target memory across runs, parallel assessment of multiple scope
@@ -58,8 +62,8 @@ records a finding only when it is backed by a concrete observation the agent col
 
 **Tools:** `search_vulns` · `http_probe` · `browse` · `browser_action` ·
 `establish_foothold` · `upload_shell` · `make_payload` · `run_command` · `privesc_scan` ·
-`pivot_scan` · `open_tunnel` · `ad_recon` · `ad_exec` · `loot` · `hypothesize` ·
-`record_finding` · `finish`.
+`pivot_scan` · `open_tunnel` · `open_reverse_tunnel` · `ad_recon` · `ad_exec` ·
+`win_privesc_scan` · `loot` · `hypothesize` · `record_finding` · `finish`.
 
 **Modes gate aggressiveness.** `static` inspects code only (no traffic); `dev` exploits
 freely against localhost or a lab; `prod` is detection-first and rate-limited. `--exploit`
@@ -155,6 +159,12 @@ call is also recorded in a JSONL audit log under `.watson_cache/audit/`.
 
 The vulnerable practice targets (`testbed/`) and the Blackveil CTF environment live in
 [Loic-ally/Blackveil](https://github.com/Loic-ally/Blackveil).
+
+A reproducible **Active Directory lab** lives in [`labs/ad/`](labs/ad/README.md): a seeded
+domain (Kerberoastable SPN, AS-REP-roastable user, Backup Operators / DnsAdmins members, a
+reused credential, and a SYSTEM-granting token-privilege host) that exercises the whole
+Windows chain — `ad_recon` → roast → BloodHound → `ad_exec` → `win_privesc_scan` → DCSync.
+One `docker compose up` for the Samba path, or `seed-dc.ps1` for a full-fidelity Windows DC.
 
 ## Stack
 
