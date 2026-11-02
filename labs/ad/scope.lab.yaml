@@ -1,0 +1,11 @@
+# Scope for the Watson AD lab — copy to scope.yaml at the repo root to use it.
+# Only the isolated lab subnet is authorized. Edit the IPs to match your range.
+
+authorized_by: "AD lab (local, isolated network) <you@example.com>"
+
+# dev: exploit the lab freely (it is yours and disposable). The chain still needs
+# --exploit on the command line to arm foothold / AD / privesc tools.
+mode: dev
+
+ips:
+  - 10.13.37.0/24     # lab subnet: DC is 10.13.37.10 (Samba path); add member hosts here

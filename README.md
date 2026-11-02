@@ -160,6 +160,12 @@ call is also recorded in a JSONL audit log under `.watson_cache/audit/`.
 The vulnerable practice targets (`testbed/`) and the Blackveil CTF environment live in
 [Loic-ally/Blackveil](https://github.com/Loic-ally/Blackveil).
 
+A reproducible **Active Directory lab** lives in [`labs/ad/`](labs/ad/README.md): a seeded
+domain (Kerberoastable SPN, AS-REP-roastable user, Backup Operators / DnsAdmins members, a
+reused credential, and a SYSTEM-granting token-privilege host) that exercises the whole
+Windows chain — `ad_recon` → roast → BloodHound → `ad_exec` → `win_privesc_scan` → DCSync.
+One `docker compose up` for the Samba path, or `seed-dc.ps1` for a full-fidelity Windows DC.
+
 ## Stack
 
 | Component | Choice |
