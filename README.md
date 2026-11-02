@@ -39,7 +39,8 @@ warranty of any kind. If you do not agree, do not use Watson.
 - **Linux post-exploitation** — host enumeration, GTFOBins-matched (and reasoned)
   privilege escalation to root, and credential/secret looting.
 - **Lateral movement** — internal-network recon and a SOCKS tunnel through the foothold
-  so probes reach in-scope internal hosts.
+  (forward, or a reverse connect-back tunnel for footholds behind NAT) so probes reach
+  in-scope internal hosts.
 - **Windows & Active Directory** — credential- and network-driven: SMB/LDAP enumeration,
   Kerberoasting and AS-REP roasting, BloodHound collection, remote command execution, and
   secret dumping (local SAM and DCSync) via industry-standard tooling.
@@ -61,8 +62,8 @@ records a finding only when it is backed by a concrete observation the agent col
 
 **Tools:** `search_vulns` · `http_probe` · `browse` · `browser_action` ·
 `establish_foothold` · `upload_shell` · `make_payload` · `run_command` · `privesc_scan` ·
-`pivot_scan` · `open_tunnel` · `ad_recon` · `ad_exec` · `win_privesc_scan` · `loot` ·
-`hypothesize` · `record_finding` · `finish`.
+`pivot_scan` · `open_tunnel` · `open_reverse_tunnel` · `ad_recon` · `ad_exec` ·
+`win_privesc_scan` · `loot` · `hypothesize` · `record_finding` · `finish`.
 
 **Modes gate aggressiveness.** `static` inspects code only (no traffic); `dev` exploits
 freely against localhost or a lab; `prod` is detection-first and rate-limited. `--exploit`

