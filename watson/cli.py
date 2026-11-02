@@ -308,39 +308,10 @@ def scan_cmd(args: list[str]) -> int:
     return assess_cmd(a)
 
 
-def _scan_web(a: list[str], port: int = 8787) -> int:
-    """Run the assessment in a thread and serve the live dashboard."""
-    import threading
-    import time
-
-    from . import events, web
-    from .scope import OutOfScope, Scope
-
-    target = a[0] if a and not a[0].startswith("--") else "(static)"
-    mode = ""
-    if "--scope" in a:
-        try:
-            mode = Scope.load(a[a.index("--scope") + 1]).mode
-        except (OutOfScope, FileNotFoundError, IndexError):
-            pass
-    events.reset()
-    events.emit("start", target=target, mode=mode)
-
-    def run():
-        time.sleep(1.2)  # let the browser connect first
-        try:
-            assess_cmd(a)
-        except Exception as e:  # noqa: BLE001 — surface on the dashboard
-            events.emit("error", msg=str(e)[:200])
-        events.emit("done")
-
-    threading.Thread(target=run, daemon=True).start()
-    print(f"\n  📊  Dashboard live: http://127.0.0.1:{port}   (Ctrl-C to stop)\n")
-    try:
-        web.serve(port)
-    except KeyboardInterrupt:
-        pass
-    return 0
+def _scan_web(a: list[str]) -> int:
+    """--web flag: run the assessment directly. For the live dashboard use `watson web`."""
+    print("\n  💡  For the live dashboard run `watson web` in a separate terminal.\n")
+    return assess_cmd(a)
 
 
 def scan_all_cmd(args: list[str]) -> int:
@@ -415,8 +386,20 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "browse":
         return browse_cmd(rest)
     if cmd == "web":
-        from .webapp import serve
-        serve(int(rest[rest.index("--port") + 1]) if "--port" in rest else 8787)
+        import subprocess
+        from pathlib import Path
+        backend = Path(__file__).parent.parent / "backend"
+        binary = backend / "target" / "release" / "watson-backend"
+        port = rest[rest.index("--port") + 1] if "--port" in rest else "8787"
+        if binary.exists():
+            cmd_line = [str(binary)]
+        else:
+            cmd_line = ["cargo", "run", "--release", "--"]
+        try:
+            subprocess.run(cmd_line, cwd=str(backend),
+                           env={**__import__("os").environ, "WATSON_PORT": port})
+        except KeyboardInterrupt:
+            pass
         return 0
     if cmd == "pdf" and rest:
         from .report import make_pdf
