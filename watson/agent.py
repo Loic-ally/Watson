@@ -394,7 +394,7 @@ class Agent:
         self.scope.require(target)
         from . import ad
         out = {"enum": ad.run(ad.smb_argv(target, user, password, nthash, domain,
-                              extra=["--shares", "--sessions", "--pass-pol", "--users"]))}
+                              extra=["--shares", "--loggedon-users", "--pass-pol", "--users"]))}
         if roast and user:
             out["kerberoast"] = ad.run(ad.kerberoast_argv(target, domain, user, password, nthash))
             out["asreproast"] = ad.run(ad.asreproast_argv(target, domain, user, password))
