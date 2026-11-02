@@ -47,7 +47,7 @@ STATUS_CONFIDENCE = {"verified": "confirmed", "potential": "unconfirmed",
 # make_payload, get_evidence) are NOT evidence of a condition on the target.
 EVIDENCE_TOOLS = {"http_probe", "run_command", "establish_foothold", "upload_shell",
                   "privesc_scan", "pivot_scan", "loot", "browse", "browser_action",
-                  "ad_recon", "ad_exec"}
+                  "ad_recon", "ad_exec", "win_privesc_scan"}
 
 _CVSS_VECTOR = re.compile(r"^CVSS:(2\.0|3\.0|3\.1|4\.0)/", re.I)
 
@@ -410,6 +410,26 @@ class Agent:
         events.emit("ad_exec", target=target, cmd=command[:80])
         return res
 
+    def win_privesc_scan(self, target: str, domain: str = "", user: str = "", password: str = "",
+                         nthash: str = "") -> dict:
+        """Enumerate token privileges and group memberships on an in-scope owned Windows host
+        (whoami /priv, /groups) and return matched local-to-SYSTEM / credential-theft paths
+        (the Windows counterpart of privesc_scan). Runs over the network via nxc; needs creds."""
+        if not self.exploit:
+            return {"error": "requires exploitation to be enabled (--exploit)"}
+        if self.scope.mode == "static":
+            return {"error": "static mode: no network"}
+        self.scope.require(target)
+        from . import ad, winprivesc
+        run = lambda cmd: ad.run(ad.exec_argv(target, cmd, user, password, nthash, domain)).get("output", "")
+        profile = winprivesc.enumerate_host(run)
+        cands = winprivesc.candidates(profile)
+        events.emit("win_privesc_scan", target=target, candidates=len(cands))
+        return {"whoami": (profile.get("whoami", "") or "")[:200],
+                "priv": (profile.get("priv", "") or "")[:800],
+                "groups_sample": "\n".join((profile.get("groups", "") or "").splitlines()[:20]),
+                "win_privesc_candidates": cands[:12]}
+
     def browse(self, url: str,
                question: str = "Identify login forms, inputs, notable features, and the tech stack.") -> dict:
         """Load the page in a real browser and SEE it (screenshot + vision) — catches JS-rendered
@@ -483,7 +503,8 @@ class Agent:
                   "browse": self.browse, "browser_action": self.browser_action,
                   "upload_shell": self.upload_shell, "make_payload": self.make_payload,
                   "pivot_scan": self.pivot_scan, "open_tunnel": self.open_tunnel,
-                  "ad_recon": self.ad_recon, "ad_exec": self.ad_exec}.get(name)
+                  "ad_recon": self.ad_recon, "ad_exec": self.ad_exec,
+                  "win_privesc_scan": self.win_privesc_scan}.get(name)
             if not fn:
                 result = {"error": f"unknown tool {name}"}
             else:
@@ -637,6 +658,21 @@ TOOLS = [
             "powershell": {"type": "boolean"}},
             "required": ["target"]}}},
     {"type": "function", "function": {
+        "name": "win_privesc_scan",
+        "description": "Windows local privilege escalation on an IN-SCOPE host you can already run "
+                       "commands on (via creds/nxc): enumerate token privileges (whoami /priv) and "
+                       "group memberships (whoami /groups), returning matched local-to-SYSTEM paths "
+                       "(SeImpersonate->Potato, SeBackup->hive dump, SeDebug->LSASS, Backup/Server "
+                       "Operators, DnsAdmins, ...). The Windows counterpart of privesc_scan. Then "
+                       "confirm a candidate with ad_exec and check for nt authority\\system. Requires "
+                       "exploitation.",
+        "parameters": {"type": "object", "properties": {
+            "target": {"type": "string", "description": "in-scope Windows host/IP you have creds for"},
+            "domain": {"type": "string"}, "user": {"type": "string"},
+            "password": {"type": "string"},
+            "nthash": {"type": "string", "description": "NT hash for pass-the-hash instead of a password"}},
+            "required": ["target"]}}},
+    {"type": "function", "function": {
         "name": "browse",
         "description": "Load a URL in a real headless Chromium and SEE it: returns a vision "
                        "analysis of the screenshot plus rendered links and forms. Use for recon, "
@@ -750,8 +786,11 @@ EXPLOIT_NOTE = (" EXPLOITATION IS AUTHORIZED AND ENABLED. Actively try to break 
                 "For an IN-SCOPE Windows / Active Directory target, use ad_recon to enumerate it "
                 "(null session first, then with any credentials you loot or are given), roast "
                 "accounts and collect BloodHound; then ad_exec to move laterally (run commands) or "
-                "dump secrets (secretsdump; just_dc for a DCSync). The objective is Domain Admin / "
-                "the krbtgt hash — keep chaining credentials across hosts until you reach it.")
+                "dump secrets (secretsdump; just_dc for a DCSync). Once you can run commands on a "
+                "Windows host, call win_privesc_scan to map its token privileges / group memberships "
+                "to a local-to-SYSTEM path (e.g. SeImpersonate -> Potato), confirm it with ad_exec, "
+                "and check for nt authority\\system. The objective is Domain Admin / the krbtgt hash "
+                "— keep chaining credentials across hosts until you reach it.")
 
 
 def _inventory_json(inv: dict) -> dict:
@@ -993,6 +1032,10 @@ if __name__ == "__main__":  # self-check: python -m watson.agent (tool gating, o
     assert "out of scope" in exp.dispatch("ad_recon", {"target": "10.9.9.9"})["error"]
     assert "destructive" in exp.ad_exec("127.0.0.1", command="shutdown /s")["error"]
     assert "pass a command" in exp.ad_exec("127.0.0.1")["error"]  # no command, no dump
+
+    # Phase 8b Windows local privesc: exploit-gated and scope-gated (no network touched)
+    assert "requires exploitation" in dev.win_privesc_scan("127.0.0.1")["error"]
+    assert "out of scope" in exp.dispatch("win_privesc_scan", {"target": "10.9.9.9"})["error"]
 
     class _Dummy:
         kind = "test"

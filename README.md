@@ -43,6 +43,9 @@ warranty of any kind. If you do not agree, do not use Watson.
 - **Windows & Active Directory** — credential- and network-driven: SMB/LDAP enumeration,
   Kerberoasting and AS-REP roasting, BloodHound collection, remote command execution, and
   secret dumping (local SAM and DCSync) via industry-standard tooling.
+- **Windows local privilege escalation** — maps a host's token privileges (`SeImpersonate`,
+  `SeBackup`, `SeDebug`, …) and powerful group memberships to concrete local-to-SYSTEM
+  techniques, the Windows counterpart of the GTFOBins-matched Linux privesc.
 - **Reporting** — `findings.json`, Markdown and styled HTML, consistent CVSS, a written
   attack narrative, the hypotheses and attack chain, and a rendered PDF.
 - **Operations** — per-target memory across runs, parallel assessment of multiple scope
@@ -58,8 +61,8 @@ records a finding only when it is backed by a concrete observation the agent col
 
 **Tools:** `search_vulns` · `http_probe` · `browse` · `browser_action` ·
 `establish_foothold` · `upload_shell` · `make_payload` · `run_command` · `privesc_scan` ·
-`pivot_scan` · `open_tunnel` · `ad_recon` · `ad_exec` · `loot` · `hypothesize` ·
-`record_finding` · `finish`.
+`pivot_scan` · `open_tunnel` · `ad_recon` · `ad_exec` · `win_privesc_scan` · `loot` ·
+`hypothesize` · `record_finding` · `finish`.
 
 **Modes gate aggressiveness.** `static` inspects code only (no traffic); `dev` exploits
 freely against localhost or a lab; `prod` is detection-first and rate-limited. `--exploit`
